@@ -86,6 +86,10 @@ function parseInstruction(instr:any) {
         return "jmp rel32";
     }
 
+    if (mnemonic === "call" && /^[a-z_.$][\w.$]*$/i.test(op1raw) && !op2raw) {
+        return "call rel32";
+    }
+
     const byMnemonic = instructions.find((entry:any) => entry.mnemonic.split(' ')[0] === mnemonic);
     if (!byMnemonic) {
         return null//byMnemonic.mnemonic;

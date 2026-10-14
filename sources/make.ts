@@ -164,7 +164,10 @@ export function generatePrintfExecutable(outputPath:string) {
   const assembledBytes:string[] = []
   for (const instruction of instructions) {
     let bytes = instruction.bytes
-    if (instruction.command === 'jmp' && instruction.instr === 'jmp rel32') {
+    if (
+      (instruction.command === 'jmp' && instruction.instr === 'jmp rel32') ||
+      (instruction.command === 'call' && instruction.instr === 'call rel32')
+    ) {
       const target = instruction.parameters[0]?.toLowerCase()
       const targetOffset = labels.get(target)
       if (targetOffset === undefined) {
