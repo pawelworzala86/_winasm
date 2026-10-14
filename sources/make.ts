@@ -110,8 +110,66 @@ export function generatePrintfExecutable(outputPath:string) {
   const DATASET:any = {}
 
 
+
+
+
+
+  const REPLS:any = []
+  const codeTxt = fs.readFileSync('./examples/test.asm').toString()
+
+
+  const lines = codeTxt.split('\n').map(l=>l.trim()).filter(l=>l.length)
+  console.log(lines)
+  let OFFSET = 0
+  let hex = ''
+  lines.map(line=>{
+    const pline = line.replace(/\,[\ ]+/gm,',')
+    const [command,params] = pline.split(/\ /gm)
+    const [paramA,paramB] = params.split(/\,/gm)
+    console.log('line',command,paramA,paramB)
+    const instr = parseInstruction(line)
+    //console.log('instr',instr)
+    let parameters = []
+    if(paramA){
+      parameters.push(paramA)
+    }
+    if(paramB){
+      parameters.push(paramB)
+    }
+    const code = parser.encode(instr, parameters);
+    parameters.map(param=>{
+      if(param.startsWith('[')){
+        const name = param.substring(1,param.length-1)
+        REPLS.push({
+          expr: name,
+          offset: OFFSET,
+          length: code.length,
+        })
+      }
+      return param
+    })
+    console.log('code',code)
+    OFFSET += code.length
+    hex += code.join('')+'\n'
+  })
+  console.log('REPLS',REPLS)
+  console.log('DATASET',DATASET)
+
+  hex = hex.replace(/\n|\r|\t|\ /gm,'')
+  const code = Buffer.from(hex,'hex')
+
+
+
+
+
+
+
+
+  const codeRawSize = 0x200;
+
+
   // --- 5. ZAWARTOŚĆ SEKCJI .data (RAW 0x400, RVA 0x2000) ---
-  const dataRaw = 0x400;
+  const dataRaw = codeRawSize + 0x200;
   const stringHelloRva = 0x2000;
 
   exe.set(enc.encode('Hello World!\n\0'), dataRaw);
@@ -125,7 +183,7 @@ export function generatePrintfExecutable(outputPath:string) {
     { dll: 'msvcrt.dll',   functions: ['printf', 'malloc'] },
   ];
 
-  const idataRaw = 0x600;
+  const idataRaw = codeRawSize + 0x400;
   const idataRva = 0x3000;
 
   // Rezerwacja miejsca na Import Directory Table
@@ -186,73 +244,9 @@ export function generatePrintfExecutable(outputPath:string) {
   // --- 7. KOD .text (RAW 0x200, RVA 0x1000) ---
   const RVA_TEXT_START = 0x1000;
 
-  /*const code = new Uint8Array([
-    0x48, 0x83, 0xEC, 0x28,                         // sub rsp, 40
-    0x48, 0x83, 0xE4, 0xF0,                         // and rsp, -16
-
-    0x48, 0x8D, 0x0D, 0x00, 0x00, 0x00, 0x00,       // lea rcx, [RIP + ?]
-    0x31, 0xC0,                                     // xor eax, eax
-
-    0xFF, 0x15, 0x00, 0x00, 0x00, 0x00,             // call [RIP + ?] ; printf
-
-    0x31, 0xC9,                                     // xor ecx, ecx
-
-    0xFF, 0x15, 0x00, 0x00, 0x00, 0x00              // call [RIP + ?] ; ExitProcess
-  ]);*/
 
 
-  const REPLS:any = []
-  const codeTxt = `
-sub rsp, 40
-and rsp, -16
-
-lea rcx, [helloTxt]
-xor eax, eax
-
-call [printf]
-xor ecx, ecx
-
-call [ExitProcess]
-`
-  const lines = codeTxt.split('\n').map(l=>l.trim()).filter(l=>l.length)
-  console.log(lines)
-  let OFFSET = 0
-  let hex = ''
-  lines.map(line=>{
-    const pline = line.replace(/\,[\ ]+/gm,',')
-    const [command,params] = pline.split(/\ /gm)
-    const [paramA,paramB] = params.split(/\,/gm)
-    console.log('line',command,paramA,paramB)
-    const instr = parseInstruction(line)
-    //console.log('instr',instr)
-    let parameters = []
-    if(paramA){
-      parameters.push(paramA)
-    }
-    if(paramB){
-      parameters.push(paramB)
-    }
-    const code = parser.encode(instr, parameters);
-    parameters.map(param=>{
-      if(param.startsWith('[')){
-        const name = param.substring(1,param.length-1)
-        REPLS.push({
-          expr: name,
-          offset: OFFSET,
-          length: code.length,
-        })
-      }
-      return param
-    })
-    console.log('code',code)
-    OFFSET += code.length
-    hex += code.join('')+'\n'
-  })
-  console.log('REPLS',REPLS)
-  console.log('DATASET',DATASET)
-
-  hex = hex.replace(/\n|\r|\t|\ /gm,'')
-  const code = Buffer.from(hex,'hex')
+  
 
 
 
@@ -272,24 +266,9 @@ call [ExitProcess]
     }
   }
 
-
-  /*console.log('stringHelloRva', stringHelloRva);
-
-  const ripAfterLea    = RVA_TEXT_START + 0x08 + 7;
-  const offsetToHello  = stringHelloRva - ripAfterLea;
-  console.log('offsetToHello', offsetToHello);
-  writeUInt32LE(code, offsetToHello, 0x0B);
-  console.log(offsetToHello, 0x0B);*/
-
-  /*const ripAfterPrintf = RVA_TEXT_START + 0x11 + 6;
-  const offsetToPrintf = iatAddresses['printf'] - ripAfterPrintf;
-  writeUInt32LE(code, offsetToPrintf, 0x13);
-
-  const ripAfterExit   = RVA_TEXT_START + 0x19 + 6;
-  const offsetToExit   = iatAddresses['ExitProcess'] - ripAfterExit;
-  writeUInt32LE(code, offsetToExit, 0x1B);*/
-
   exe.set(code, 0x200);
+
+
 
   fs.writeFileSync(outputPath, exe);
   console.log(`[+] Plik wygenerowany pomyślnie: ${outputPath}`);

@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node sources/pe64.ts"
+    "test": "node sources/make.ts"
   },
   "repository": {
     "type": "git",
