@@ -1,4 +1,4 @@
-const instructions = require('./instructions.js');
+import instructions from './instructions.ts'
 
 function classifyRegister(reg:any) {
     reg = reg.toLowerCase();

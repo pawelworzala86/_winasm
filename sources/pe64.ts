@@ -1,4 +1,6 @@
 import fs from 'fs'
+import parseInstruction from './mnemonic.ts'
+import parser from './opcode.ts'
 
 if(!fs.existsSync('./dist/')){
   fs.mkdirSync('./dist/')
@@ -189,6 +191,41 @@ export function generatePrintfExecutable(outputPath:string) {
 
     0xFF, 0x15, 0x00, 0x00, 0x00, 0x00              // call [RIP + ?] ; ExitProcess
   ]);
+
+  const codeTxt = `
+sub rsp, 40
+and rsp, -16
+
+lea rcx, [helloTxt]
+xor eax, eax
+
+call [printf]
+xor ecx, ecx
+
+call [ExitProcess]
+`
+  const lines = codeTxt.split('\n').map(l=>l.trim()).filter(l=>l.length)
+  console.log(lines)
+  lines.map(line=>{
+    const pline = line.replace(/\,[\ ]+/gm,',')
+    const [command,params] = pline.split(/\ /gm)
+    const [paramA,paramB] = params.split(/\,/gm)
+    console.log('line',command,paramA,paramB)
+    const instr = parseInstruction(line)
+    //console.log('instr',instr)
+    const parameters = []
+    if(paramA){
+      parameters.push(paramA)
+    }
+    if(paramB){
+      parameters.push(paramB)
+    }
+    const code = parser.encode(instr, parameters);
+    console.log('code',code)
+  })
+
+
+
 
   console.log('stringHelloRva', stringHelloRva);
 
