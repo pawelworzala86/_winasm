@@ -106,10 +106,18 @@ export function generatePrintfExecutable(outputPath:string) {
 
   const enc = new TextEncoder();
 
+
+  const DATASET:any = {}
+
+
   // --- 5. ZAWARTOŚĆ SEKCJI .data (RAW 0x400, RVA 0x2000) ---
   const dataRaw = 0x400;
   const stringHelloRva = 0x2000;
+
   exe.set(enc.encode('Hello World!\n\0'), dataRaw);
+  DATASET['helloTxt'] = stringHelloRva + 0
+
+
 
   // --- 6. ZAWARTOŚĆ SEKCJI .idata (RAW 0x600, RVA 0x3000) ---
   const IAT_LAYOUT = [
@@ -192,6 +200,8 @@ export function generatePrintfExecutable(outputPath:string) {
     0xFF, 0x15, 0x00, 0x00, 0x00, 0x00              // call [RIP + ?] ; ExitProcess
   ]);
 
+
+  const REPLS:any = []
   const codeTxt = `
 sub rsp, 40
 and rsp, -16
@@ -206,6 +216,7 @@ call [ExitProcess]
 `
   const lines = codeTxt.split('\n').map(l=>l.trim()).filter(l=>l.length)
   console.log(lines)
+  let OFFSET = 0
   lines.map(line=>{
     const pline = line.replace(/\,[\ ]+/gm,',')
     const [command,params] = pline.split(/\ /gm)
@@ -213,7 +224,7 @@ call [ExitProcess]
     console.log('line',command,paramA,paramB)
     const instr = parseInstruction(line)
     //console.log('instr',instr)
-    const parameters = []
+    let parameters = []
     if(paramA){
       parameters.push(paramA)
     }
@@ -221,26 +232,55 @@ call [ExitProcess]
       parameters.push(paramB)
     }
     const code = parser.encode(instr, parameters);
+    parameters.map(param=>{
+      if(param.startsWith('[')){
+        const name = param.substring(1,param.length-1)
+        REPLS.push({
+          expr: name,
+          offset: OFFSET,
+          length: code.length,
+        })
+      }
+      return param
+    })
     console.log('code',code)
+    OFFSET += code.length
   })
+  console.log('REPLS',REPLS)
+  console.log('DATASET',DATASET)
+
+  for(const RP of REPLS){
+    if(DATASET[RP.expr]){
+      const ripAfterLea    = RVA_TEXT_START + RP.offset + RP.length;
+      const offsetToHello  = DATASET[RP.expr] - ripAfterLea;
+      console.log('offsetToHello', offsetToHello);
+      const writeAddr = RP.offset + (RP.length-4)
+      writeUInt32LE(code, offsetToHello, writeAddr)
+      //console.log(offsetToHello, 0x0B);
+    }else{
+      const ripAfterPrintf = RVA_TEXT_START + RP.offset + RP.length;
+      const offsetToPrintf = iatAddresses[RP.expr] - ripAfterPrintf;
+      const writeAddr = RP.offset + (RP.length-4)
+      writeUInt32LE(code, offsetToPrintf, writeAddr);
+    }
+  }
 
 
-
-
-  console.log('stringHelloRva', stringHelloRva);
+  /*console.log('stringHelloRva', stringHelloRva);
 
   const ripAfterLea    = RVA_TEXT_START + 0x08 + 7;
   const offsetToHello  = stringHelloRva - ripAfterLea;
   console.log('offsetToHello', offsetToHello);
   writeUInt32LE(code, offsetToHello, 0x0B);
+  console.log(offsetToHello, 0x0B);*/
 
-  const ripAfterPrintf = RVA_TEXT_START + 0x11 + 6;
+  /*const ripAfterPrintf = RVA_TEXT_START + 0x11 + 6;
   const offsetToPrintf = iatAddresses['printf'] - ripAfterPrintf;
   writeUInt32LE(code, offsetToPrintf, 0x13);
 
   const ripAfterExit   = RVA_TEXT_START + 0x19 + 6;
   const offsetToExit   = iatAddresses['ExitProcess'] - ripAfterExit;
-  writeUInt32LE(code, offsetToExit, 0x1B);
+  writeUInt32LE(code, offsetToExit, 0x1B);*/
 
   exe.set(code, 0x200);
 
