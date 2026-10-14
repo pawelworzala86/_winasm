@@ -70,9 +70,21 @@ function parseInstruction(instr:any) {
     if (!trimmed) return null;
 
     const parts = trimmed.split(/\s+/).filter(Boolean);
+    const [mnemonic, op1raw, op2raw] = parts;
+
+    if (mnemonic === "ret") {
+        if (parts.length === 1) return "ret";
+        if (parts.length === 2 && /^\d+$/.test(op1raw) && Number(op1raw) <= 0xFFFF) {
+            return "ret imm16";
+        }
+        return null;
+    }
+
     if (parts.length < 2) return null;
 
-    const [mnemonic, op1raw, op2raw] = parts;
+    if (mnemonic === "jmp" && /^[a-z_.$][\w.$]*$/i.test(op1raw) && !op2raw) {
+        return "jmp rel32";
+    }
 
     const byMnemonic = instructions.find((entry:any) => entry.mnemonic.split(' ')[0] === mnemonic);
     if (!byMnemonic) {

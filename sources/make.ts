@@ -118,44 +118,67 @@ export function generatePrintfExecutable(outputPath:string) {
   const codeTxt = fs.readFileSync('./examples/test.asm').toString()
 
 
-  const lines = codeTxt.split('\n').map(l=>l.trim()).filter(l=>l.length)
-  console.log(lines)
+  const lines = codeTxt.split(/\r?\n/)
+  const labels = new Map<string, number>()
+  const instructions:any[] = []
   let OFFSET = 0
-  let hex = ''
-  lines.map(line=>{
-    const pline = line.replace(/\,[\ ]+/gm,',')
-    const [command,params] = pline.split(/\ /gm)
-    const [paramA,paramB] = params.split(/\,/gm)
-    console.log('line',command,paramA,paramB)
-    const instr = parseInstruction(line)
-    //console.log('instr',instr)
-    let parameters = []
-    if(paramA){
-      parameters.push(paramA)
-    }
-    if(paramB){
-      parameters.push(paramB)
-    }
-    const code = parser.encode(instr, parameters);
-    parameters.map(param=>{
-      if(param.startsWith('[')){
-        const name = param.substring(1,param.length-1)
-        REPLS.push({
-          expr: name,
-          offset: OFFSET,
-          length: code.length,
-        })
+
+  lines.forEach((sourceLine, index) => {
+    const line = sourceLine.trim()
+    if (!line) return
+
+    const labelMatch = line.match(/^([a-z_.$][\w.$]*):$/i)
+    if (labelMatch) {
+      const label = labelMatch[1].toLowerCase()
+      if (labels.has(label)) {
+        throw new Error(`Duplicate label "${labelMatch[1]}" on line ${index + 1}`)
       }
-      return param
+      labels.set(label, OFFSET)
+      return
+    }
+
+    const instructionMatch = line.match(/^(\S+)(?:\s+(.+))?$/)
+    if (!instructionMatch) return
+
+    const [, command, rawParameters = ''] = instructionMatch
+    const instr = parseInstruction(line)
+    if (!instr) {
+      throw new Error(`Invalid or unsupported instruction on line ${index + 1}: ${line}`)
+    }
+
+    const parameters = rawParameters
+      ? rawParameters.split(',').map(parameter => parameter.trim())
+      : []
+    const bytes = parser.encode(instr, parameters)
+    instructions.push({ line: index + 1, command: command.toLowerCase(), instr, parameters, offset: OFFSET, bytes })
+
+    parameters.forEach(param => {
+      if (param.startsWith('[')) {
+        const name = param.substring(1, param.length - 1)
+        REPLS.push({ expr: name, offset: OFFSET, length: bytes.length })
+      }
     })
-    console.log('code',code)
-    OFFSET += code.length
-    hex += code.join('')+'\n'
+    OFFSET += bytes.length
   })
-  console.log('REPLS',REPLS)
+
+  const assembledBytes:string[] = []
+  for (const instruction of instructions) {
+    let bytes = instruction.bytes
+    if (instruction.command === 'jmp' && instruction.instr === 'jmp rel32') {
+      const target = instruction.parameters[0]?.toLowerCase()
+      const targetOffset = labels.get(target)
+      if (targetOffset === undefined) {
+        throw new Error(`Undefined label "${instruction.parameters[0]}" on line ${instruction.line}`)
+      }
+      const relativeOffset = targetOffset - (instruction.offset + bytes.length)
+      bytes = parser.encode(instruction.instr, [{ rel: true, offset: relativeOffset }])
+    }
+    assembledBytes.push(...bytes)
+  }
+
+  const hex = assembledBytes.join('')
   console.log('DATASET',DATASET)
 
-  hex = hex.replace(/\n|\r|\t|\ /gm,'')
   const code = Buffer.from(hex,'hex')
 
 

@@ -7,4 +7,11 @@ xor eax, eax
 call [printf]
 xor ecx, ecx
 
+EndoFunc:
+    call [printf]
+    xor ecx, ecx
+ret
+
+call [EndoFunc]
+
 call [ExitProcess]
