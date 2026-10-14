@@ -186,7 +186,7 @@ export function generatePrintfExecutable(outputPath:string) {
   // --- 7. KOD .text (RAW 0x200, RVA 0x1000) ---
   const RVA_TEXT_START = 0x1000;
 
-  const code = new Uint8Array([
+  /*const code = new Uint8Array([
     0x48, 0x83, 0xEC, 0x28,                         // sub rsp, 40
     0x48, 0x83, 0xE4, 0xF0,                         // and rsp, -16
 
@@ -198,7 +198,7 @@ export function generatePrintfExecutable(outputPath:string) {
     0x31, 0xC9,                                     // xor ecx, ecx
 
     0xFF, 0x15, 0x00, 0x00, 0x00, 0x00              // call [RIP + ?] ; ExitProcess
-  ]);
+  ]);*/
 
 
   const REPLS:any = []
@@ -217,6 +217,7 @@ call [ExitProcess]
   const lines = codeTxt.split('\n').map(l=>l.trim()).filter(l=>l.length)
   console.log(lines)
   let OFFSET = 0
+  let hex = ''
   lines.map(line=>{
     const pline = line.replace(/\,[\ ]+/gm,',')
     const [command,params] = pline.split(/\ /gm)
@@ -245,9 +246,15 @@ call [ExitProcess]
     })
     console.log('code',code)
     OFFSET += code.length
+    hex += code.join('')+'\n'
   })
   console.log('REPLS',REPLS)
   console.log('DATASET',DATASET)
+
+  hex = hex.replace(/\n|\r|\t|\ /gm,'')
+  const code = Buffer.from(hex,'hex')
+
+
 
   for(const RP of REPLS){
     if(DATASET[RP.expr]){
