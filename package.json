@@ -1,0 +1,26 @@
+{
+  "name": "_winasm",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node sources/pe64.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pawelworzala86/_winasm.git"
+  },
+  "keywords": [],
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/pawelworzala86/_winasm/issues"
+  },
+  "homepage": "https://github.com/pawelworzala86/_winasm#readme",
+  "dependencies": {
+    "fs": "^0.0.1-security"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}
