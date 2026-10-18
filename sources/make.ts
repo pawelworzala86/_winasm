@@ -185,17 +185,32 @@ function textToHex(text: string): string {
 
 
 
-  const idataRawSize = 0x200;
-  const idataRawStart = dataRawStart + dataRawSize 
+  const idataRawStart = dataRawStart + dataRawSize
 
   let idataRaw = codeRawSize + 0x400;
   const idataRva = 0x3000;
 
 
 
-
   
-  const idata = new Uint8Array(0x200);
+  let idata = '';
+  const writeHexToidata = (hex: string, offset: number) => {
+    const start = offset * 2;
+    if (idata.length < start) {
+      idata = idata.padEnd(start, '0');
+    }
+    const end = start + hex.length;
+    if (idata.length < end) {
+      idata = idata.padEnd(end, '0');
+    }
+    idata = idata.slice(0, start) + hex + idata.slice(end);
+  };
+  const writeToidata = (value: number, offset: number, byteLength = 4) => {
+    const hex = Array.from({ length: byteLength }, (_, index) =>
+      (index < 4 ? (value >>> (index * 8)) & 0xff : 0).toString(16).padStart(2, '0')
+    ).join('');
+    writeHexToidata(hex, offset);
+  };
   idataRaw = 0
 
   // --- 6. ZAWARTOŚĆ SEKCJI .idata (RAW 0x600, RVA 0x3000) ---
@@ -215,17 +230,16 @@ function textToHex(text: string): string {
     const iltRva = iatRva + (dllGroup.functions.length + 1) * 8;
     currentRva = iltRva + (dllGroup.functions.length + 1) * 8;
 
-    writeUInt32LE(idata, iltRva, importDescOffset + 0, `OriginalFirstThunk (ILT) dla ${dllGroup.dll}`);
-    writeUInt32LE(idata, 0,       importDescOffset + 4, 'TimeDateStamp');
-    writeUInt32LE(idata, 0,       importDescOffset + 8, 'ForwarderChain');
+    writeToidata(iltRva, importDescOffset + 0);
+    writeToidata(0,      importDescOffset + 4);
+    writeToidata(0,      importDescOffset + 8);
 
     dllGroup.functions.forEach((fnName, fnIndex) => {
       const fnNameRva = currentRva;
       const fnNameRaw = idataRaw + (fnNameRva - idataRva);
 
-      idata[fnNameRaw] = 0x00;
-      idata[fnNameRaw + 1] = 0x00;
-      idata.set(enc.encode(`${fnName}\0`), fnNameRaw + 2);
+      writeToidata(0, fnNameRaw, 2);
+      writeHexToidata(textToHex(`${fnName}\0`), fnNameRaw + 2);
 
       const nameStructSize = 2 + fnName.length + 1;
       const paddedSize = (nameStructSize % 2 !== 0) ? nameStructSize + 1 : nameStructSize;
@@ -234,31 +248,35 @@ function textToHex(text: string): string {
       const iatOffset = idataRaw + (iatRva - idataRva) + (fnIndex * 8);
       const iltOffset = idataRaw + (iltRva - idataRva) + (fnIndex * 8);
 
-      writeUInt32LE(idata, fnNameRva, iatOffset, `IAT Entry: ${dllGroup.dll}!${fnName}`);
-      writeUInt32LE(idata, fnNameRva, iltOffset, `ILT Entry: ${dllGroup.dll}!${fnName}`);
+      writeToidata(fnNameRva, iatOffset);
+      writeToidata(fnNameRva, iltOffset);
 
       iatAddresses[fnName] = iatRva + (fnIndex * 8);
     });
 
     const iatNullOffset = idataRaw + (iatRva - idataRva) + (dllGroup.functions.length * 8);
     const iltNullOffset = idataRaw + (iltRva - idataRva) + (dllGroup.functions.length * 8);
-    writeUInt32LE(idata, 0, iatNullOffset, `IAT NULL Terminator dla ${dllGroup.dll}`);
-    writeUInt32LE(idata, 0, iltNullOffset, `ILT NULL Terminator dla ${dllGroup.dll}`);
+    writeToidata(0, iatNullOffset, 8);
+    writeToidata(0, iltNullOffset, 8);
 
     const dllNameRva = currentRva;
     const dllNameRaw = idataRaw + (dllNameRva - idataRva);
-    idata.set(enc.encode(`${dllGroup.dll}\0`), dllNameRaw);
+    writeHexToidata(textToHex(`${dllGroup.dll}\0`), dllNameRaw);
     currentRva += dllGroup.dll.length + 1;
 
-    writeUInt32LE(idata, dllNameRva, importDescOffset + 12, `Name RVA dla ${dllGroup.dll}`);
-    writeUInt32LE(idata, iatRva,     importDescOffset + 16, `FirstThunk (IAT) dla ${dllGroup.dll}`);
+    writeToidata(dllNameRva, importDescOffset + 12);
+    writeToidata(iatRva,     importDescOffset + 16);
   });
 
   const nullDescOffset = idataRaw + (IAT_LAYOUT.length * 20);
   for (let i = 0; i < 5; i++) {
-    writeUInt32LE(idata, 0, nullDescOffset + i * 4, 'Null Import Descriptor');
+    writeToidata(0, nullDescOffset + i * 4);
   }
 
+  const idataVirtualSize = idata.length / 2;
+  const fileAlignment = 0x200;
+  const idataRawSize = Math.ceil(idataVirtualSize / fileAlignment) * fileAlignment;
+  idata = idata.padEnd(idataRawSize * 2, '0');
 
 
 
@@ -271,7 +289,7 @@ function textToHex(text: string): string {
 
 
 
-  // Rozmiar pliku zwiększony do 0x800 (Headers 0x200 + .text 0x200 + .data 0x200 + .idata 0x200)
+  // Rozmiar sekcji .idata jest wyliczany z wygenerowanego ciągu hex i wyrównywany do File Alignment.
   const fileSize = idataRawStart + idataRawSize
   const exe = new Uint8Array(fileSize);
 
@@ -294,7 +312,7 @@ function textToHex(text: string): string {
   writeUInt16LE(exe, 0x020B, optOffset, 'Magic: PE32+ (64-bit)');
 
   writeUInt32LE(exe, 0x00000200, optOffset + 4, 'Size of Code');
-  writeUInt32LE(exe, 0x00000400, optOffset + 8, 'Size of Initialized Data (.data + .idata)');
+  writeUInt32LE(exe, dataRawSize + idataRawSize, optOffset + 8, 'Size of Initialized Data (.data + .idata)');
 
   writeUInt32LE(exe, 0x00001000, optOffset + 16, 'Address of Entry Point (RVA)');
   writeUInt32LE(exe, 0x00001000, optOffset + 20, 'Base Of Code');
@@ -307,7 +325,8 @@ function textToHex(text: string): string {
   writeUInt16LE(exe, 0, optOffset + 42, 'Minor OS Version');
   writeUInt16LE(exe, 6, optOffset + 48, 'Major Subsystem Version');
   writeUInt16LE(exe, 0, optOffset + 50, 'Minor Subsystem Version');
-  writeUInt32LE(exe, 0x00004000, optOffset + 56, 'Size of Image');
+  const sizeOfImage = Math.ceil((idataRva + idataVirtualSize) / 0x1000) * 0x1000;
+  writeUInt32LE(exe, sizeOfImage, optOffset + 56, 'Size of Image');
   writeUInt32LE(exe, 0x00000200, optOffset + 60, 'Size of Headers');
   writeUInt16LE(exe, 3, optOffset + 68, 'Subsystem: 3 = Windows CUI (Konsola)');
 
@@ -348,9 +367,9 @@ function textToHex(text: string): string {
   // Sekcja 3: .idata (RVA 0x3000, RAW 0x600)
   secOffset += 40;
   exe.set(new TextEncoder().encode('.idata\0\0'), secOffset);
-  writeUInt32LE(exe, 0x00001000, secOffset + 8, 'Virtual Size .idata');
+  writeUInt32LE(exe, idataVirtualSize, secOffset + 8, 'Virtual Size .idata');
   writeUInt32LE(exe, 0x00003000, secOffset + 12, 'Virtual Address .idata (RVA 0x3000)');
-  writeUInt32LE(exe, 0x00000200, secOffset + 16, 'Size of Raw Data .idata');
+  writeUInt32LE(exe, idataRawSize, secOffset + 16, 'Size of Raw Data .idata');
   writeUInt32LE(exe, 0x00000600, secOffset + 20, 'Pointer to Raw Data .idata (0x600)');
   writeUInt32LE(exe, 0xC0000040, secOffset + 36, 'INITIALIZED_DATA | READ | WRITE');
 
@@ -393,7 +412,7 @@ function textToHex(text: string): string {
 
   exe.set(code, codeRawStart);
   exe.set(dataSet, dataRawStart);
-  exe.set(idata, idataRawStart);
+  exe.set(Buffer.from(idata, 'hex'), idataRawStart);
 
 
   fs.writeFileSync(outputPath, exe);
