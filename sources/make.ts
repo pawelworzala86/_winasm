@@ -115,7 +115,26 @@ export function generatePrintfExecutable(outputPath:string) {
 
 
   const REPLS:any = []
-  const codeTxt = fs.readFileSync('./examples/test.asm').toString()
+  const SOURCE:any = {
+    code: '',
+    data: '',
+    import: '',
+  }
+  const source = fs.readFileSync('./examples/test.asm').toString()
+  let swith = 'code'
+  source.split('\n').map(line=>{
+    line = line.trim()
+    if(line=='.code'){
+      swith = 'code'
+    }else if(line=='.data'){
+      swith = 'data'
+    }else if(line=='.import'){
+      swith = 'import'
+    }else{
+      SOURCE[swith] += line+'\n'
+    }
+  })
+  const codeTxt = SOURCE.code
 
 
   const lines = codeTxt.split(/\r?\n/)
@@ -123,7 +142,7 @@ export function generatePrintfExecutable(outputPath:string) {
   const instructions:any[] = []
   let OFFSET = 0
 
-  lines.forEach((sourceLine, index) => {
+  lines.forEach((sourceLine:any, index:any) => {
     const line = sourceLine.split(';', 1)[0].trim()
     if (!line) return
 
@@ -147,12 +166,12 @@ export function generatePrintfExecutable(outputPath:string) {
     }
 
     const parameters = rawParameters
-      ? rawParameters.split(',').map(parameter => parameter.trim())
+      ? rawParameters.split(',').map((parameter:any) => parameter.trim())
       : []
     const bytes = parser.encode(instr, parameters)
     instructions.push({ line: index + 1, command: command.toLowerCase(), instr, parameters, offset: OFFSET, bytes })
 
-    parameters.forEach(param => {
+    parameters.forEach((param:any) => {
       if (/^\[[a-z_.$][\w.$]*\]$/i.test(param)) {
         const name = param.substring(1, param.length - 1)
         REPLS.push({ expr: name, offset: OFFSET, length: bytes.length })
@@ -191,6 +210,29 @@ export function generatePrintfExecutable(outputPath:string) {
 
 
 
+
+
+
+
+
+
+
+
+function textToHex(text: string): string {
+  // 1. Zakoduj tekst do UTF-8 jako ciąg bajtów (Uint8Array)
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(text);
+
+  // 2. Przekształć każdy bajt na postać szesnastkową i połącz w jeden łańcuch
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+
+
+
+
   const codeRawSize = 0x200;
 
 
@@ -198,8 +240,18 @@ export function generatePrintfExecutable(outputPath:string) {
   const dataRaw = codeRawSize + 0x200;
   const stringHelloRva = 0x2000;
 
-  exe.set(enc.encode('Hello World!\n\0'), dataRaw);
+  //exe.set(enc.encode('Hello World!\n\0'), dataRaw);
   DATASET['helloTxt'] = stringHelloRva + 0
+
+  let dataHex = ''
+  dataHex += textToHex('Hello World!')
+  dataHex += '00'
+
+  dataHex = dataHex.replace(/\t|\r|\n\|\ /gm,'')
+
+  const dataSet = Buffer.from(dataHex,'hex')
+
+
 
 
 
@@ -293,6 +345,7 @@ export function generatePrintfExecutable(outputPath:string) {
   }
 
   exe.set(code, 0x200);
+  exe.set(dataSet, dataRaw);
 
 
 
