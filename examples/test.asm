@@ -6,14 +6,23 @@ xor eax, eax
 
 call [printf]
 
+lea rcx, [helloTxt]
+push rcx
 call EndoFunc
+add rsp, 8
 xor ecx, ecx
+
 call [ExitProcess]
 
 EndoFunc:
-    sub rsp, 40
-    lea rcx, [helloTxt]
+    push rbp
+    mov rbp, rsp
+    sub rsp, 16
+
+    mov rcx, [rbp+16]
     xor eax, eax
     call [printf]
-    add rsp, 40
+
+    mov rsp, rbp
+    pop rbp
 ret

@@ -124,7 +124,7 @@ export function generatePrintfExecutable(outputPath:string) {
   let OFFSET = 0
 
   lines.forEach((sourceLine, index) => {
-    const line = sourceLine.trim()
+    const line = sourceLine.split(';', 1)[0].trim()
     if (!line) return
 
     const labelMatch = line.match(/^([a-z_.$][\w.$]*):$/i)
@@ -153,7 +153,7 @@ export function generatePrintfExecutable(outputPath:string) {
     instructions.push({ line: index + 1, command: command.toLowerCase(), instr, parameters, offset: OFFSET, bytes })
 
     parameters.forEach(param => {
-      if (param.startsWith('[')) {
+      if (/^\[[a-z_.$][\w.$]*\]$/i.test(param)) {
         const name = param.substring(1, param.length - 1)
         REPLS.push({ expr: name, offset: OFFSET, length: bytes.length })
       }

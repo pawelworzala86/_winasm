@@ -10,18 +10,18 @@ class OpcodeParser {
         const entry = this.table.find((x:any) => x.mnemonic === mnemonic);
         if (!entry) throw new Error("Unknown instruction: " + mnemonic);
 
-        const bytes = this.encodeOpcodePattern(entry.opcode, operands);
+        const bytes = this.encodeOpcodePattern(entry.opcode, operands, entry.mnemonic);
         return Array.from(bytes).map(b => b.toString(16).padStart(2, '0'));
     }
 
-    encodeOpcodePattern(pattern:any, operands:any) {
+    encodeOpcodePattern(pattern:any, operands:any, mnemonic:any) {
         pattern = pattern.replace(/\s*\+\s*/g, '+');
         const tokens = pattern.split(/\s+/);
         let out = [];
 
         for (let t of tokens) {
             if (t === "/r") {
-                out.push(...this.encodeModRM(operands));
+                out.push(...this.encodeModRM(operands, mnemonic));
             }
             else if (t.startsWith("/")) {
                 const reg = parseInt(t.substring(1));
@@ -57,11 +57,52 @@ class OpcodeParser {
         return Uint8Array.from(out);
     }
 
-    encodeModRM(operands:any) {
+    encodeModRM(operands:any, mnemonic:any) {
         const [dst, src] = operands;
 
-        const dstReg = this.regIndex(dst);
-        const srcReg = this.regIndex(src);
+        let dstReg = this.regIndex(dst);
+        let srcReg = this.regIndex(src);
+
+        if (typeof src === 'string') {
+            const memoryBase = src.match(/^\[\s*(rax|rcx|rdx|rbx|rsp|rbp|rsi|rdi|r(?:[89]|1[0-5]))\s*(?:([+-])\s*(0x[0-9a-f]+|\d+))?\s*\]$/i);
+            if (memoryBase) {
+                const baseReg = memoryBase[1].toLowerCase();
+                const baseIndex = this.regIndex(baseReg);
+                const parsedDisplacement = memoryBase[3]
+                    ? Number(memoryBase[3])
+                    : 0;
+                const displacement = memoryBase[2] === '-'
+                    ? -parsedDisplacement
+                    : parsedDisplacement;
+                if (!Number.isSafeInteger(displacement) || displacement < -0x80000000 || displacement > 0x7fffffff) {
+                    throw new Error(`Invalid memory displacement: ${src}`);
+                }
+
+                const needsSib = (baseIndex & 7) === 4;
+                const needsDisplacement = displacement !== 0 || (baseIndex & 7) === 5;
+                const useDisp8 = needsDisplacement && displacement >= -128 && displacement <= 127;
+                const mod = needsDisplacement ? (useDisp8 ? 1 : 2) : 0;
+                const rm = needsSib ? 4 : baseIndex & 7;
+                const modrm = (mod << 6) | ((dstReg & 7) << 3) | rm;
+                const rex = this.rex(dstReg, baseIndex);
+                const out = rex ? [rex, modrm] : [modrm];
+
+                if (needsSib) {
+                    out.push((4 << 3) | (baseIndex & 7));
+                }
+                if (useDisp8) {
+                    out.push(displacement & 0xff);
+                } else if (needsDisplacement) {
+                    out.push(
+                        displacement & 0xff,
+                        (displacement >> 8) & 0xff,
+                        (displacement >> 16) & 0xff,
+                        (displacement >> 24) & 0xff
+                    );
+                }
+                return out;
+            }
+        }
 
         // Jeśli drugi operand jest adresem (np. '0x...' lub '[0x...]') — RIP-relative (Mod=00, R/M=101)
         if (typeof src === 'string' && !this.regWidth(src)) {
@@ -83,6 +124,9 @@ class OpcodeParser {
         }
 
         // Obie strony to rejestry -> Mod = 11
+        if (/^\w+ r\/m\d+, r\d+$/.test(mnemonic)) {
+            [dstReg, srcReg] = [srcReg, dstReg];
+        }
         const rex = this.rex(dstReg, srcReg);
         const modrm = 0xC0 | ((dstReg & 7) << 3) | (srcReg & 7);
 
