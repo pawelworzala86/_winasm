@@ -188,8 +188,83 @@ function textToHex(text: string): string {
   const idataRawSize = 0x200;
   const idataRawStart = dataRawStart + dataRawSize 
 
-  const idataRaw = codeRawSize + 0x400;
+  let idataRaw = codeRawSize + 0x400;
   const idataRva = 0x3000;
+
+
+
+
+  
+  const idata = new Uint8Array(0x200);
+  idataRaw = 0
+
+  // --- 6. ZAWARTOŚĆ SEKCJI .idata (RAW 0x600, RVA 0x3000) ---
+  const IAT_LAYOUT = [
+    { dll: 'kernel32.dll', functions: ['ExitProcess'] },
+    { dll: 'msvcrt.dll',   functions: ['printf', 'malloc'] },
+  ];
+
+  // Rezerwacja miejsca na Import Directory Table
+  let currentRva = idataRva + (IAT_LAYOUT.length + 1) * 20;
+  const iatAddresses:any = {};
+
+  IAT_LAYOUT.forEach((dllGroup, dllIndex) => {
+    const importDescOffset = idataRaw + (dllIndex * 20);
+
+    const iatRva = currentRva;
+    const iltRva = iatRva + (dllGroup.functions.length + 1) * 8;
+    currentRva = iltRva + (dllGroup.functions.length + 1) * 8;
+
+    writeUInt32LE(idata, iltRva, importDescOffset + 0, `OriginalFirstThunk (ILT) dla ${dllGroup.dll}`);
+    writeUInt32LE(idata, 0,       importDescOffset + 4, 'TimeDateStamp');
+    writeUInt32LE(idata, 0,       importDescOffset + 8, 'ForwarderChain');
+
+    dllGroup.functions.forEach((fnName, fnIndex) => {
+      const fnNameRva = currentRva;
+      const fnNameRaw = idataRaw + (fnNameRva - idataRva);
+
+      idata[fnNameRaw] = 0x00;
+      idata[fnNameRaw + 1] = 0x00;
+      idata.set(enc.encode(`${fnName}\0`), fnNameRaw + 2);
+
+      const nameStructSize = 2 + fnName.length + 1;
+      const paddedSize = (nameStructSize % 2 !== 0) ? nameStructSize + 1 : nameStructSize;
+      currentRva += paddedSize;
+
+      const iatOffset = idataRaw + (iatRva - idataRva) + (fnIndex * 8);
+      const iltOffset = idataRaw + (iltRva - idataRva) + (fnIndex * 8);
+
+      writeUInt32LE(idata, fnNameRva, iatOffset, `IAT Entry: ${dllGroup.dll}!${fnName}`);
+      writeUInt32LE(idata, fnNameRva, iltOffset, `ILT Entry: ${dllGroup.dll}!${fnName}`);
+
+      iatAddresses[fnName] = iatRva + (fnIndex * 8);
+    });
+
+    const iatNullOffset = idataRaw + (iatRva - idataRva) + (dllGroup.functions.length * 8);
+    const iltNullOffset = idataRaw + (iltRva - idataRva) + (dllGroup.functions.length * 8);
+    writeUInt32LE(idata, 0, iatNullOffset, `IAT NULL Terminator dla ${dllGroup.dll}`);
+    writeUInt32LE(idata, 0, iltNullOffset, `ILT NULL Terminator dla ${dllGroup.dll}`);
+
+    const dllNameRva = currentRva;
+    const dllNameRaw = idataRaw + (dllNameRva - idataRva);
+    idata.set(enc.encode(`${dllGroup.dll}\0`), dllNameRaw);
+    currentRva += dllGroup.dll.length + 1;
+
+    writeUInt32LE(idata, dllNameRva, importDescOffset + 12, `Name RVA dla ${dllGroup.dll}`);
+    writeUInt32LE(idata, iatRva,     importDescOffset + 16, `FirstThunk (IAT) dla ${dllGroup.dll}`);
+  });
+
+  const nullDescOffset = idataRaw + (IAT_LAYOUT.length * 20);
+  for (let i = 0; i < 5; i++) {
+    writeUInt32LE(idata, 0, nullDescOffset + i * 4, 'Null Import Descriptor');
+  }
+
+
+
+
+
+
+
 
 
 
@@ -291,68 +366,6 @@ function textToHex(text: string): string {
 
 
 
-
-  // --- 6. ZAWARTOŚĆ SEKCJI .idata (RAW 0x600, RVA 0x3000) ---
-  const IAT_LAYOUT = [
-    { dll: 'kernel32.dll', functions: ['ExitProcess'] },
-    { dll: 'msvcrt.dll',   functions: ['printf', 'malloc'] },
-  ];
-
-  // Rezerwacja miejsca na Import Directory Table
-  let currentRva = idataRva + (IAT_LAYOUT.length + 1) * 20;
-  const iatAddresses:any = {};
-
-  IAT_LAYOUT.forEach((dllGroup, dllIndex) => {
-    const importDescOffset = idataRaw + (dllIndex * 20);
-
-    const iatRva = currentRva;
-    const iltRva = iatRva + (dllGroup.functions.length + 1) * 8;
-    currentRva = iltRva + (dllGroup.functions.length + 1) * 8;
-
-    writeUInt32LE(exe, iltRva, importDescOffset + 0, `OriginalFirstThunk (ILT) dla ${dllGroup.dll}`);
-    writeUInt32LE(exe, 0,       importDescOffset + 4, 'TimeDateStamp');
-    writeUInt32LE(exe, 0,       importDescOffset + 8, 'ForwarderChain');
-
-    dllGroup.functions.forEach((fnName, fnIndex) => {
-      const fnNameRva = currentRva;
-      const fnNameRaw = idataRaw + (fnNameRva - idataRva);
-
-      exe[fnNameRaw] = 0x00;
-      exe[fnNameRaw + 1] = 0x00;
-      exe.set(enc.encode(`${fnName}\0`), fnNameRaw + 2);
-
-      const nameStructSize = 2 + fnName.length + 1;
-      const paddedSize = (nameStructSize % 2 !== 0) ? nameStructSize + 1 : nameStructSize;
-      currentRva += paddedSize;
-
-      const iatOffset = idataRaw + (iatRva - idataRva) + (fnIndex * 8);
-      const iltOffset = idataRaw + (iltRva - idataRva) + (fnIndex * 8);
-
-      writeUInt32LE(exe, fnNameRva, iatOffset, `IAT Entry: ${dllGroup.dll}!${fnName}`);
-      writeUInt32LE(exe, fnNameRva, iltOffset, `ILT Entry: ${dllGroup.dll}!${fnName}`);
-
-      iatAddresses[fnName] = iatRva + (fnIndex * 8);
-    });
-
-    const iatNullOffset = idataRaw + (iatRva - idataRva) + (dllGroup.functions.length * 8);
-    const iltNullOffset = idataRaw + (iltRva - idataRva) + (dllGroup.functions.length * 8);
-    writeUInt32LE(exe, 0, iatNullOffset, `IAT NULL Terminator dla ${dllGroup.dll}`);
-    writeUInt32LE(exe, 0, iltNullOffset, `ILT NULL Terminator dla ${dllGroup.dll}`);
-
-    const dllNameRva = currentRva;
-    const dllNameRaw = idataRaw + (dllNameRva - idataRva);
-    exe.set(enc.encode(`${dllGroup.dll}\0`), dllNameRaw);
-    currentRva += dllGroup.dll.length + 1;
-
-    writeUInt32LE(exe, dllNameRva, importDescOffset + 12, `Name RVA dla ${dllGroup.dll}`);
-    writeUInt32LE(exe, iatRva,     importDescOffset + 16, `FirstThunk (IAT) dla ${dllGroup.dll}`);
-  });
-
-  const nullDescOffset = idataRaw + (IAT_LAYOUT.length * 20);
-  for (let i = 0; i < 5; i++) {
-    writeUInt32LE(exe, 0, nullDescOffset + i * 4, 'Null Import Descriptor');
-  }
-
   // --- 7. KOD .text (RAW 0x200, RVA 0x1000) ---
   const RVA_TEXT_START = 0x1000;
 
@@ -380,7 +393,7 @@ function textToHex(text: string): string {
 
   exe.set(code, codeRawStart);
   exe.set(dataSet, dataRawStart);
-
+  exe.set(idata, idataRawStart);
 
 
   fs.writeFileSync(outputPath, exe);
