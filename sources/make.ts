@@ -116,9 +116,18 @@ export function generatePrintfExecutable(outputPath:string) {
     assembledBytes.push(...bytes)
   }
 
-  const hex = assembledBytes.join('')
+  let hex = assembledBytes.join('')
   console.log('DATASET',DATASET)
 
+
+  const codeRawStart = 0x200;
+  let codeRawSize
+  {
+    const idataVirtualSize = hex.length / 2;
+    const fileAlignment = 0x200;
+    codeRawSize = Math.ceil(idataVirtualSize / fileAlignment) * fileAlignment;
+    hex = hex.padEnd(codeRawSize * 2, '0');
+  }
   const code = Buffer.from(hex,'hex')
 
 
@@ -150,13 +159,12 @@ function textToHex(text: string): string {
 
 
 
-  const codeRawStart = 0x200;
-  const codeRawSize = 0x200;
+  
 
 
   // --- 5. ZAWARTOŚĆ SEKCJI .data (RAW 0x400, RVA 0x2000) ---
   const dataRawStart = codeRawSize + codeRawStart
-  const dataRawSize = 0x200;
+  //const dataRawSize = 0x200;
 
   const stringHelloRva = 0x2000;
 
@@ -169,6 +177,13 @@ function textToHex(text: string): string {
 
   dataHex = dataHex.replace(/\t|\r|\n\|\ /gm,'')
 
+  let dataRawSize
+  {
+    const idataVirtualSize = dataHex.length / 2;
+    const fileAlignment = 0x200;
+    dataRawSize = Math.ceil(idataVirtualSize / fileAlignment) * fileAlignment;
+    dataHex = dataHex.padEnd(dataRawSize * 2, '0');
+  }
   const dataSet = Buffer.from(dataHex,'hex')
 
 
