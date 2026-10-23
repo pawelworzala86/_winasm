@@ -1,0 +1,48 @@
+invoke 6:
+
+; Przekazanie pierwszych 4 argumentów w rejestrach
+mov rcx, a    ; 1
+mov rdx, b    ; 2
+mov r8,  c    ; 3
+mov r9,  d    ; 4
+
+; Przygotowanie stosu dla argumentów e, f
+sub rsp, 40   ; miejsce na shadow space + e + f (16 bajtów + wyrównanie)
+
+mov [rsp+32], e   ; 5
+mov [rsp+24], f   ; 6
+
+call MyFunction
+
+add rsp, 40   ; przywrócenie stosu
+
+
+
+
+
+
+invoke 8:
+
+; Rejestry
+mov rcx, a    ; 1
+mov rdx, b    ; 2
+mov r8,  c    ; 3
+mov r9,  d    ; 4
+
+; Przygotowanie stosu:
+; - 32 bajty shadow space
+; - 4 argumenty na stosie (e, f, g, h)
+; - razem 32 + 4×8 = 64 bajty
+; - stos musi być 16-bajtowo wyrównany
+
+sub rsp, 64   ; alokacja miejsca
+
+; Argumenty na stosie (od prawej do lewej)
+mov [rsp+56], h   ; 8
+mov [rsp+48], g   ; 7
+mov [rsp+40], f   ; 6
+mov [rsp+32], e   ; 5
+
+call MyFunction
+
+add rsp, 64       ; przywrócenie stosu
