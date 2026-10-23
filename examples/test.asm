@@ -1,6 +1,5 @@
 .code
     sub rsp, 40
-    and rsp, -16
 
     invoke printf, addr helloTxt
 
@@ -8,7 +7,7 @@
 
     rvcall EndoFunc, addr helloTxt
 
-    call [ExitProcess]
+    invoke ExitProcess
 
     proc EndoFunc hello
         invoke printf, hello

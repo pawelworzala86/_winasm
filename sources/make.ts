@@ -50,7 +50,7 @@ export function generatePrintfExecutable(){
 
   let source = fs.readFileSync(sourceFileName).toString()
   source = Prepare(source)
-  fs.writeFileSync(destFileName.replace('.exe','.asm'), source);
+  //fs.writeFileSync(destFileName.replace('.exe','.asm'), source);
 
   let swith = 'code'
   source.split('\n').map(line=>{
