@@ -273,13 +273,16 @@ export function generatePrintfExecutable(outputPath:string) {
   }
 
   dataTxt.split('\n').map((line:string)=>{
+    if(!line.trim().length){
+      return
+    }
     const [name,kind] = line.split('\ ')
     let value = line.replace(name,'').replace(kind,'').trim()
     let values = value.split(',')
     if(kind=='db'){
       for(const val of values){
         if(val[0]=='\''){
-          addString(name,val.substring(1,val.substring.length-1))
+          addString(name,val.substring(1,val.length-1))
         }else{
           intToHex(parseInt(val),1)
           dataOFFSET++
