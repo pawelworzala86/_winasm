@@ -63,7 +63,9 @@ export function Prepare(code:string){
         return match
     })*/
 
-    const REGS = ['rcx','rdx']
+    const REGS = ['rcx','rdx','r8','r9']
+    const REGS6 = ['rcx','rdx','r8','r9','[rsp+32]','[rsp+24]']
+    const REGS8 = ['rcx','rdx','r8','r9','[rsp+32]','[rsp+40]','[rsp+48]','[rsp+56]']
 
     code = code.replace(/invoke .*/gm,match=>{
         let name = match.split(' ')[1].trim()
@@ -78,12 +80,24 @@ export function Prepare(code:string){
                     param = param.replace('addr','').trim()
                 }
                 return `${oper} ${REGS[reg++]}, [${param}]`
+            }else{
+                if(params.length<=6){
+                    return `lea rax, [${param}]
+                    mov ${REGS6[reg++]}, rax`
+                }else{
+                    return `lea rax, [${param}]
+                    mov ${REGS8[reg++]}, rax`
+                }
             }
         })
-        return `    sub rsp, 40
+        let sub = 40
+        if(params.length>6){
+            sub = 64
+        }
+        return `    sub rsp, ${sub}
     ${params.join('\n')}
     call [${name}]
-    add rsp, 40`
+    add rsp, ${sub}`
     })
 
     code = code.replace(/rvcall .*/gm,match=>{
