@@ -145,35 +145,166 @@ export function generatePrintfExecutable(outputPath:string) {
 
 
 
-function textToHex(text: string): string {
-  // 1. Zakoduj tekst do UTF-8 jako ciąg bajtów (Uint8Array)
-  const encoder = new TextEncoder();
-  const bytes = encoder.encode(text);
-
-  // 2. Przekształć każdy bajt na postać szesnastkową i połącz w jeden łańcuch
-  return Array.from(bytes)
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-}
 
 
 
 
+  const dataTxt = SOURCE.data
   
 
 
   // --- 5. ZAWARTOŚĆ SEKCJI .data (RAW 0x400, RVA 0x2000) ---
   const dataRawStart = codeRawSize + codeRawStart
-  //const dataRawSize = 0x200;
-
   const stringHelloRva = 0x2000;
 
-  //exe.set(enc.encode('Hello World!\n\0'), dataRaw);
-  DATASET['helloTxt'] = stringHelloRva + 0
 
   let dataHex = ''
-  dataHex += textToHex('Hello World!')
-  dataHex += '00'
+  let dataOFFSET = 0
+
+  function textToHex(text: string): string {
+    // 1. Zakoduj tekst do UTF-8 jako ciąg bajtów (Uint8Array)
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(text);
+
+    // 2. Przekształć każdy bajt na postać szesnastkową i połącz w jeden łańcuch
+    return Array.from(bytes)
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  function intToHex(value: number | bigint, bytes: number): string {
+    const bigVal = BigInt(value);
+    const bitLength = BigInt(bytes * 8);
+    
+    // Maksymalna dodatnia wartość mieszcząca się w danej liczbie bajtów
+    const maxUnsigned = (1n << bitLength) - 1n;
+    const maxSigned = (1n << (bitLength - 1n)) - 1n;
+    const minSigned = -(1n << (bitLength - 1n));
+
+    let processedVal = bigVal;
+
+    // Obsługa liczb ujemnych (Two's Complement)
+    if (bigVal < 0n) {
+      if (bigVal < minSigned) {
+        throw new Error(`Wartość ${value} jest za mała dla ${bytes} bajt(ów).`);
+      }
+      processedVal = (1n << bitLength) + bigVal;
+    } else {
+      if (bigVal > maxUnsigned) {
+        // Sprawdź czy mieści się chociaż w zakresie ze znakiem, jeśli użytkownik podał dużą dodatnią
+        throw new Error(`Wartość ${value} przekracza zakres ${bytes} bajt(ów).`);
+      }
+    }
+
+    // Konwersja do hex, wielkie litery i uzupełnienie zerami do wymaganej długości
+    const hex = processedVal.toString(16).toUpperCase();
+    const targetLength = bytes * 2; // 1 bajt = 2 znaki hex
+
+    return hex.padStart(targetLength, '0');
+  }
+  function uintToHex(value: number | bigint, bytes: number): string {
+    const bigVal = BigInt(value);
+    const bitLength = BigInt(bytes * 8);
+    const maxUnsigned = (1n << bitLength) - 1n;
+
+    // Sprawdzenie, czy liczba nie jest ujemna
+    if (bigVal < 0n) {
+      throw new Error(`Wartość ${value} nie może być ujemna w funkcji uintToHex.`);
+    }
+
+    // Sprawdzenie, czy liczba mieści się w zakresie bez znaku dla danej liczby bajtów
+    if (bigVal > maxUnsigned) {
+      throw new Error(`Wartość ${value} przekracza maksymalny zakres (${maxUnsigned}) dla ${bytes} bajt(ów).`);
+    }
+
+    // Konwersja do hex, wielkie litery i uzupełnienie zerami
+    const hex = bigVal.toString(16).toUpperCase();
+    const targetLength = bytes * 2; // 1 bajt = 2 znaki hex
+
+    return hex.padStart(targetLength, '0');
+  }
+  function floatToHex(value: number | bigint, bytes: number): string {
+    const numVal = Number(value);
+    const buffer = new ArrayBuffer(bytes);
+    const view = new DataView(buffer);
+
+    // Zapis do bufora w zależności od liczby bajtów (Big-Endian / Network byte order)
+    if (bytes === 4) {
+      view.setFloat32(0, numVal, false);
+    } else if (bytes === 8) {
+      view.setFloat64(0, numVal, false);
+    } else {
+      throw new Error(`Nieobsługiwana liczba bajtów dla float. Dozwolone wartości to 4 (Float32) lub 8 (Float64).`);
+    }
+
+    // Odczyt bajtów i konwersja na ciąg Hex
+    const bytesArray = new Uint8Array(buffer);
+    let hex = '';
+    for (let i = 0; i < bytesArray.length; i++) {
+      hex += bytesArray[i].toString(16).padStart(2, '0');
+    }
+
+    return hex.toUpperCase();
+  }
+
+
+  function addString(name:string,value:string){
+    const hex = textToHex(value)
+    dataHex += hex
+    DATASET[name] = stringHelloRva + dataOFFSET
+    dataOFFSET += hex.length/2
+  }
+  function addInt(name:string,value:number,bytes:number){
+    const hex = intToHex(value,bytes)
+    dataHex += hex
+    DATASET[name] = stringHelloRva + dataOFFSET
+    dataOFFSET += hex.length/2
+  }
+  function addUInt(name:string,value:number,bytes:number){
+    const hex = uintToHex(value,bytes)
+    dataHex += hex
+    DATASET[name] = stringHelloRva + dataOFFSET
+    dataOFFSET += hex.length/2
+  }
+  function addFloat(name:string,value:number,bytes:number){
+    const hex = floatToHex(value,bytes)
+    dataHex += hex
+    DATASET[name] = stringHelloRva + dataOFFSET
+    dataOFFSET += hex.length/2
+  }
+
+  dataTxt.split('\n').map((line:string)=>{
+    const [name,kind] = line.split('\ ')
+    let value = line.replace(name,'').replace(kind,'').trim()
+    let values = value.split(',')
+    if(kind=='db'){
+      for(const val of values){
+        if(val[0]=='\''){
+          addString(name,val.substring(1,val.substring.length-1))
+        }else{
+          intToHex(parseInt(val),1)
+          dataOFFSET++
+        }
+      }
+      return
+    }
+    let size = 1
+    if(kind=='dw'){
+      size = 2
+    }else if(kind=='dd'){
+      size = 4
+    }if(kind=='dq'){
+      size = 8
+    }
+    for(const val of values){
+      if(val.trim().endsWith('u')){
+        addUInt(name,parseInt(val),size)
+      }else if(val.trim().endsWith('f')||(val.indexOf('.')>-1)){
+        addFloat(name,parseInt(val),size)
+      }else{
+        addInt(name,parseInt(val),size)
+      }
+    }
+  })
 
   dataHex = dataHex.replace(/\t|\r|\n\|\ /gm,'')
 
