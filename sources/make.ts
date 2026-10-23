@@ -1,10 +1,19 @@
 import fs from 'fs'
 import parseInstruction from './mnemonic.ts'
 import parser from './opcode.ts'
+import Prepare from './prepare.ts'
+
+
+
 
 if(!fs.existsSync('./dist/')){
   fs.mkdirSync('./dist/')
 }
+
+let sourceFileName = process.argv[2]
+let destFileName = process.argv[3]
+
+
 
 
 
@@ -20,7 +29,7 @@ function writeUInt16LE(array:any, value:any, offset:any, comment:string|null=nul
   array[offset + 1] = (value >> 8) & 0xff;
 }
 
-export function generatePrintfExecutable(outputPath:string) {
+export function generatePrintfExecutable(){
 
   const enc = new TextEncoder();
 
@@ -38,7 +47,11 @@ export function generatePrintfExecutable(outputPath:string) {
     data: '',
     import: '',
   }
-  const source = fs.readFileSync('./examples/test.asm').toString()
+
+  let source = fs.readFileSync(sourceFileName).toString()
+  source = Prepare(source)
+  fs.writeFileSync(destFileName.replace('.exe','.asm'), source);
+
   let swith = 'code'
   source.split('\n').map(line=>{
     line = line.trim()
@@ -564,8 +577,8 @@ export function generatePrintfExecutable(outputPath:string) {
   exe.set(Buffer.from(idata, 'hex'), idataRawStart);
 
 
-  fs.writeFileSync(outputPath, exe);
-  console.log(`[+] Plik wygenerowany pomyślnie: ${outputPath}`);
+  fs.writeFileSync(destFileName, exe);
+  //console.log(`[+] Plik wygenerowany pomyślnie: ${outputPath}`);
 }
 
-generatePrintfExecutable('./dist/hello.exe');
+generatePrintfExecutable()

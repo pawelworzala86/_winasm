@@ -2,31 +2,17 @@
     sub rsp, 40
     and rsp, -16
 
-    lea rcx, [helloTxt]
-    xor eax, eax
+    invoke printf, addr helloTxt
 
-    call [printf]
+    rvcall EndoFunc, addr helloTxt
 
-    lea rcx, [helloTxt]
-    push rcx
-    call EndoFunc
-    add rsp, 8
-    xor ecx, ecx
+    rvcall EndoFunc, addr helloTxt
 
     call [ExitProcess]
 
-    EndoFunc:
-        push rbp
-        mov rbp, rsp
-        sub rsp, 16
-
-        mov rcx, [rbp+16]
-        xor eax, eax
-        call [printf]
-
-        mov rsp, rbp
-        pop rbp
-    ret
+    proc EndoFunc hello
+        invoke printf, hello
+    endp
 
 .data
     helloTxt db 'Hello World!!!',0
