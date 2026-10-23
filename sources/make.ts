@@ -513,8 +513,8 @@ export function generatePrintfExecutable(){
   exe.set(new TextEncoder().encode('.text\0\0\0'), secOffset);
   writeUInt32LE(exe, 0x00001000, secOffset + 8, 'Virtual Size .text');
   writeUInt32LE(exe, 0x00001000, secOffset + 12, 'Virtual Address .text (RVA 0x1000)');
-  writeUInt32LE(exe, 0x00000200, secOffset + 16, 'Size of Raw Data .text');
-  writeUInt32LE(exe, 0x00000200, secOffset + 20, 'Pointer to Raw Data .text (0x200)');
+  writeUInt32LE(exe, codeRawSize, secOffset + 16, 'Size of Raw Data .text');
+  writeUInt32LE(exe, codeRawStart, secOffset + 20, 'Pointer to Raw Data .text (0x200)');
   writeUInt32LE(exe, 0x60000020, secOffset + 36, 'CODE | EXECUTE | READ');
 
   // Sekcja 2: .data (RVA 0x2000, RAW 0x400)
@@ -522,8 +522,8 @@ export function generatePrintfExecutable(){
   exe.set(new TextEncoder().encode('.data\0\0\0'), secOffset);
   writeUInt32LE(exe, 0x00001000, secOffset + 8, 'Virtual Size .data');
   writeUInt32LE(exe, 0x00002000, secOffset + 12, 'Virtual Address .data (RVA 0x2000)');
-  writeUInt32LE(exe, 0x00000200, secOffset + 16, 'Size of Raw Data .data');
-  writeUInt32LE(exe, 0x00000400, secOffset + 20, 'Pointer to Raw Data .data (0x400)');
+  writeUInt32LE(exe, dataRawSize, secOffset + 16, 'Size of Raw Data .data');
+  writeUInt32LE(exe, dataRawStart, secOffset + 20, 'Pointer to Raw Data .data (0x400)');
   writeUInt32LE(exe, 0xC0000040, secOffset + 36, 'INITIALIZED_DATA | READ | WRITE');
 
   // Sekcja 3: .idata (RVA 0x3000, RAW 0x600)
@@ -532,7 +532,7 @@ export function generatePrintfExecutable(){
   writeUInt32LE(exe, idataVirtualSize, secOffset + 8, 'Virtual Size .idata');
   writeUInt32LE(exe, 0x00003000, secOffset + 12, 'Virtual Address .idata (RVA 0x3000)');
   writeUInt32LE(exe, idataRawSize, secOffset + 16, 'Size of Raw Data .idata');
-  writeUInt32LE(exe, 0x00000600, secOffset + 20, 'Pointer to Raw Data .idata (0x600)');
+  writeUInt32LE(exe, idataRawStart, secOffset + 20, 'Pointer to Raw Data .idata (0x600)');
   writeUInt32LE(exe, 0xC0000040, secOffset + 36, 'INITIALIZED_DATA | READ | WRITE');
 
 
