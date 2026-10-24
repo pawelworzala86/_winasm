@@ -2,6 +2,7 @@ import fs from 'fs'
 import parseInstruction from './mnemonic.ts'
 import parser from './opcode.ts'
 import Prepare from './prepare.ts'
+import { isWeakMap } from 'util/types'
 
 
 
@@ -341,9 +342,44 @@ export function generatePrintfExecutable(){
 
 
 
+  const idataTxt:string = SOURCE.import
+  const imp:any = {}
 
+  function addDLL(name:string,dll:string){
+      imp[name] = {dll:dll,functions:[]}
+  }
+  function addDllFunc(name:string,from:string,target:string){
+      imp[name].functions.push(from)
+  }
 
-
+  function importFromData(data:string){
+      data=data.replace(/\,\\\n/gm,',')
+      data=data.replace(/\'/gm,'')
+      data.replace(/library.*/gm,(match:any):any=>{
+          let parts = match.replace('library','').trim().split(',').map((p:any)=>p.trim())
+          //console.log(parts)
+          for(let i=0;i<parts.length;i+=2){
+              addDLL(parts[i],parts[i+1])
+          }
+      })
+      data.replace(/import.*/gm,(match:any):any=>{
+          let parts = match.replace('import','').trim().split(',').map((p:any)=>p.trim())
+          console.log(parts)
+          let name = parts[0]
+          for(let i=1;i<parts.length;i+=2){
+              //if(new RegExp('\\['+parts[i]+'\\]','gm').exec(dataTxt)){
+                  addDllFunc(name,parts[i],parts[i+1])
+              //}
+          }
+      })
+      //console.log(data)
+  }
+  importFromData(idataTxt)
+  console.log('imp',imp)
+  const IAT_LAYOUT = []
+  for(const key of Object.keys(imp)){
+    IAT_LAYOUT.push(imp[key])
+  }
 
 
 
@@ -376,10 +412,10 @@ export function generatePrintfExecutable(){
   idataRaw = 0
 
   // --- 6. ZAWARTOŚĆ SEKCJI .idata (RAW 0x600, RVA 0x3000) ---
-  const IAT_LAYOUT = [
+  /*const IAT_LAYOUT = [
     { dll: 'kernel32.dll', functions: ['ExitProcess'] },
     { dll: 'msvcrt.dll',   functions: ['printf', 'malloc'] },
-  ];
+  ];*/
 
   // Rezerwacja miejsca na Import Directory Table
   let currentRva = idataRva + (IAT_LAYOUT.length + 1) * 20;
@@ -396,7 +432,7 @@ export function generatePrintfExecutable(){
     writeToidata(0,      importDescOffset + 4);
     writeToidata(0,      importDescOffset + 8);
 
-    dllGroup.functions.forEach((fnName, fnIndex) => {
+    dllGroup.functions.forEach((fnName:string, fnIndex:number) => {
       const fnNameRva = currentRva;
       const fnNameRaw = idataRaw + (fnNameRva - idataRva);
 
