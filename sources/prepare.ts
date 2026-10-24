@@ -82,11 +82,9 @@ export function Prepare(code:string){
                 return `${oper} ${REGS[reg++]}, [${param}]`
             }else{
                 if(params.length<=6){
-                    return `lea rax, [${param}]
-                    mov ${REGS6[reg++]}, rax`
+                    return `mov ${REGS6[reg++]}, [${param}]`
                 }else{
-                    return `lea rax, [${param}]
-                    mov ${REGS8[reg++]}, rax`
+                    return `mov ${REGS8[reg++]}, [${param}]`
                 }
             }
         })
