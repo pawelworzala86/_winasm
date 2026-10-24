@@ -103,15 +103,17 @@ export function Prepare(code:string){
         let params = match.replace('rvcall '+name+'','').split(',').map(t=>t.trim()).filter(p=>p.length)
         name = name.replace(',','').trim()
         let reg = 0
-        params = params.map((param,i)=>{
+        const pushes = params.map((param,i)=>{
             if(param.indexOf('addr')>-1){
                 return `lea rax, [${param.replace('addr','').trim()}]\npush rax`
             }
             return `push [${param}]`
         })
-        return `    ${params.join('\n')}
+        const shadowSpace = 32 + (params.length % 2) * 8
+        return `    ${pushes.join('\n')}
+    sub rsp, ${shadowSpace}
     call ${name}
-    add rsp, ${params.length*8}`
+    add rsp, ${shadowSpace + params.length * 8}`
     })
 
     const PROCS:any = []
@@ -124,9 +126,11 @@ export function Prepare(code:string){
         match = match.replace(/endp$/gm,'')
         match = match.trim()
 
+        const shadowSpace = 32 + (params.length % 2) * 8
         params.map((param,i)=>{
             match = match.replace(new RegExp('\\b'+param+'\\b','gm'),match=>{
-                return `[rbp+${(i+2)*8}]`
+                const stackOffset = 16 + shadowSpace + (params.length - i - 1) * 8
+                return `[rbp+${stackOffset}]`
             })
         })
 

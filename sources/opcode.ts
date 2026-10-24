@@ -19,13 +19,34 @@ class OpcodeParser {
         const tokens = pattern.split(/\s+/);
         let out = [];
 
+        const needsExtendedRegister = (operands:any[]) => operands.some((operand:any) => {
+            if (typeof operand !== 'string') return false;
+            if (this.regIndex(operand) > 7) return true;
+            const memoryBase = operand.match(/^\[\s*(rax|rcx|rdx|rbx|rsp|rbp|rsi|rdi|r(?:[89]|1[0-5]))\b/i);
+            return memoryBase !== null && this.regIndex(memoryBase[1]) > 7;
+        });
+
+        const appendModRM = (encoded:any[], hasRex:boolean) => {
+            const rex = encoded[0];
+            if (hasRex) {
+                if (out[0] >= 0x40 && out[0] <= 0x4F) {
+                    out[0] |= rex;
+                    out.push(...encoded.slice(1));
+                } else {
+                    out.unshift(...encoded);
+                }
+            } else {
+                out.push(...encoded);
+            }
+        };
+
         for (let t of tokens) {
             if (t === "/r") {
-                out.push(...this.encodeModRM(operands, mnemonic));
+                appendModRM(this.encodeModRM(operands, mnemonic), needsExtendedRegister(operands));
             }
             else if (t.startsWith("/")) {
                 const reg = parseInt(t.substring(1));
-                out.push(...this.encodeModRM_fixedReg(reg, operands));
+                appendModRM(this.encodeModRM_fixedReg(reg, operands), needsExtendedRegister(operands));
             }
             else if (t === "cb") {
                 out.push(this.encodeRel8(operands));
@@ -111,7 +132,7 @@ class OpcodeParser {
 
             // reg = dstReg, rm = 101 (RIP-relative)
             const rex = this.rex(dstReg, 0);
-            const modrm = (0 << 6) | (dstReg << 3) | 5;
+            const modrm = (0 << 6) | ((dstReg & 7) << 3) | 5;
 
             const disp32 = [
                 address & 0xFF,

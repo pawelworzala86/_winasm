@@ -1,7 +1,7 @@
 .code
     sub rsp, 40
 
-    invoke printf, addr format, addr msgA, addr valA
+    invoke printf, addr format, addr msgA, valA
 
     rvcall EndoFunc, addr helloTxt
 
