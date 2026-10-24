@@ -1,7 +1,7 @@
 .code
     sub rsp, 40
 
-    invoke printf, addr helloTxt
+    invoke printf, addr format, addr msgA, addr valA
 
     rvcall EndoFunc, addr helloTxt
 
@@ -15,6 +15,9 @@
 
 .data
     helloTxt db 'Hello World!!!',0
+    format db 'msg %s %i',0
+    msgA db 'a',0
+    valA dq 1
 
 .import
     library kernel32,'kernel32.dll',\

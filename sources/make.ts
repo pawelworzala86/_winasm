@@ -106,7 +106,7 @@ export function generatePrintfExecutable(){
     parameters.forEach((param:any) => {
       if (/^\[[a-z_.$][\w.$]*\]$/i.test(param)) {
         const name = param.substring(1, param.length - 1)
-        REPLS.push({ expr: name, offset: OFFSET, length: bytes.length })
+        REPLS.push({ expr: name.toLowerCase(), offset: OFFSET, length: bytes.length })
       }
     })
     OFFSET += bytes.length
@@ -213,7 +213,7 @@ export function generatePrintfExecutable(){
     const hex = processedVal.toString(16).toUpperCase();
     const targetLength = bytes * 2; // 1 bajt = 2 znaki hex
 
-    return hex.padStart(targetLength, '0');
+    return hex.padStart(targetLength, '0').match(/../g)!.reverse().join('');
   }
   function uintToHex(value: number | bigint, bytes: number): string {
     const bigVal = BigInt(value);
@@ -234,7 +234,7 @@ export function generatePrintfExecutable(){
     const hex = bigVal.toString(16).toUpperCase();
     const targetLength = bytes * 2; // 1 bajt = 2 znaki hex
 
-    return hex.padStart(targetLength, '0');
+    return hex.padStart(targetLength, '0').match(/../g)!.reverse().join('');
   }
   function floatToHex(value: number | bigint, bytes: number): string {
     const numVal = Number(value);
@@ -257,69 +257,78 @@ export function generatePrintfExecutable(){
       hex += bytesArray[i].toString(16).padStart(2, '0');
     }
 
-    return hex.toUpperCase();
+    return hex.toUpperCase().match(/../g)!.reverse().join('');
   }
 
 
-  function addString(name:string,value:string){
-    const hex = textToHex(value)
-    dataHex += hex
-    DATASET[name] = stringHelloRva + dataOFFSET
-    dataOFFSET += hex.length/2
-  }
-  function addInt(name:string,value:number,bytes:number){
-    const hex = intToHex(value,bytes)
-    dataHex += hex
-    DATASET[name] = stringHelloRva + dataOFFSET
-    dataOFFSET += hex.length/2
-  }
-  function addUInt(name:string,value:number,bytes:number){
-    const hex = uintToHex(value,bytes)
-    dataHex += hex
-    DATASET[name] = stringHelloRva + dataOFFSET
-    dataOFFSET += hex.length/2
-  }
-  function addFloat(name:string,value:number,bytes:number){
-    const hex = floatToHex(value,bytes)
-    dataHex += hex
-    DATASET[name] = stringHelloRva + dataOFFSET
-    dataOFFSET += hex.length/2
-  }
+  function splitDataValues(value: string): string[] {
+    const values: string[] = [];
+    let start = 0;
+    let inString = false;
 
-  dataTxt.split('\n').map((line:string)=>{
-    if(!line.trim().length){
-      return
+    for (let index = 0; index < value.length; index++) {
+      if (value[index] === "'") {
+        inString = !inString;
+      } else if (value[index] === ',' && !inString) {
+        values.push(value.slice(start, index).trim());
+        start = index + 1;
+      }
     }
-    const [name,kind] = line.split('\ ')
-    let value = line.replace(name,'').replace(kind,'').trim()
-    let values = value.split(',')
-    if(kind=='db'){
-      for(const val of values){
-        if(val[0]=='\''){
-          addString(name,val.substring(1,val.length-1))
-        }else{
-          intToHex(parseInt(val),1)
-          dataOFFSET++
+
+    values.push(value.slice(start).trim());
+    return values;
+  }
+
+  dataTxt.split(/\r?\n/).forEach((sourceLine: string, index: number) => {
+    const line = sourceLine.split(';', 1)[0].trim();
+    if (!line) {
+      return;
+    }
+
+    const declaration = line.match(/^([^\s]+)\s+(db|dw|dd|dq)\s+(.+)$/i);
+    if (!declaration) {
+      throw new Error(`Invalid data declaration on line ${index + 1}: ${line}`);
+    }
+
+    const [, name, rawKind, value] = declaration;
+    const kind = rawKind.toLowerCase();
+    const size = kind === 'db' ? 1 : kind === 'dw' ? 2 : kind === 'dd' ? 4 : 8;
+    const symbol = name.toLowerCase();
+    if (Object.hasOwn(DATASET, symbol)) {
+      throw new Error(`Duplicate data label "${name}" on line ${index + 1}`);
+    }
+    DATASET[symbol] = stringHelloRva + dataOFFSET;
+
+    for (const val of splitDataValues(value)) {
+      if (!val) {
+        throw new Error(`Empty data value on line ${index + 1}`);
+      }
+
+      if (val.startsWith("'") && val.endsWith("'") && val.length >= 2) {
+        if (kind !== 'db') {
+          throw new Error(`String values require db on line ${index + 1}`);
         }
+        const hex = textToHex(val.substring(1, val.length - 1));
+        dataHex += hex;
+        dataOFFSET += hex.length / 2;
+        continue;
       }
-      return
-    }
-    let size = 1
-    if(kind=='dw'){
-      size = 2
-    }else if(kind=='dd'){
-      size = 4
-    }if(kind=='dq'){
-      size = 8
-    }
-    for(const val of values){
-      if(val.trim().endsWith('u')){
-        addUInt(name,parseInt(val),size)
-      }else if(val.trim().endsWith('f')||(val.indexOf('.')>-1)){
-        addFloat(name,parseInt(val),size)
-      }else{
-        addInt(name,parseInt(val),size)
+
+      const isUnsigned = /u$/i.test(val);
+      const isFloat = /f$/i.test(val) || val.includes('.');
+      const numericValue = val.replace(/[uf]$/i, '');
+      const parsedValue = isFloat ? Number.parseFloat(numericValue) : Number.parseInt(numericValue, 0);
+      if (!Number.isFinite(parsedValue)) {
+        throw new Error(`Invalid data value "${val}" on line ${index + 1}`);
       }
+
+      const hex = isFloat
+        ? floatToHex(parsedValue, size)
+        : isUnsigned
+          ? uintToHex(parsedValue, size)
+          : intToHex(parsedValue, size);
+      dataHex += hex;
+      dataOFFSET += size;
     }
   })
 
@@ -449,7 +458,7 @@ export function generatePrintfExecutable(){
       writeToidata(fnNameRva, iatOffset);
       writeToidata(fnNameRva, iltOffset);
 
-      iatAddresses[fnName] = iatRva + (fnIndex * 8);
+      iatAddresses[fnName.toLowerCase()] = iatRva + (fnIndex * 8);
     });
 
     const iatNullOffset = idataRaw + (iatRva - idataRva) + (dllGroup.functions.length * 8);
@@ -593,7 +602,7 @@ export function generatePrintfExecutable(){
 
 
   for(const RP of REPLS){
-    if(DATASET[RP.expr]){
+    if(DATASET[RP.expr] !== undefined){
       const ripAfterLea    = RVA_TEXT_START + RP.offset + RP.length;
       const offsetToHello  = DATASET[RP.expr] - ripAfterLea;
       console.log('offsetToHello', offsetToHello);
