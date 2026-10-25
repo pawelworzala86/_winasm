@@ -358,7 +358,7 @@ export function generatePrintfExecutable(){
       imp[name] = {dll:dll,functions:[]}
   }
   function addDllFunc(name:string,from:string,target:string){
-      imp[name].functions.push(from)
+      imp[name].functions.push({from,target})
   }
 
   function importFromData(data:string){
@@ -441,14 +441,14 @@ export function generatePrintfExecutable(){
     writeToidata(0,      importDescOffset + 4);
     writeToidata(0,      importDescOffset + 8);
 
-    dllGroup.functions.forEach((fnName:string, fnIndex:number) => {
+    dllGroup.functions.forEach((fnOnj:any, fnIndex:number) => {
       const fnNameRva = currentRva;
       const fnNameRaw = idataRaw + (fnNameRva - idataRva);
 
       writeToidata(0, fnNameRaw, 2);
-      writeHexToidata(textToHex(`${fnName}\0`), fnNameRaw + 2);
+      writeHexToidata(textToHex(`${fnOnj.target}\0`), fnNameRaw + 2);
 
-      const nameStructSize = 2 + fnName.length + 1;
+      const nameStructSize = 2 + fnOnj.target.length + 1;
       const paddedSize = (nameStructSize % 2 !== 0) ? nameStructSize + 1 : nameStructSize;
       currentRva += paddedSize;
 
@@ -458,7 +458,7 @@ export function generatePrintfExecutable(){
       writeToidata(fnNameRva, iatOffset);
       writeToidata(fnNameRva, iltOffset);
 
-      iatAddresses[fnName.toLowerCase()] = iatRva + (fnIndex * 8);
+      iatAddresses[fnOnj.from.toLowerCase()] = iatRva + (fnIndex * 8);
     });
 
     const iatNullOffset = idataRaw + (iatRva - idataRva) + (dllGroup.functions.length * 8);
