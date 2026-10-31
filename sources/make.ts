@@ -17,6 +17,26 @@ let destFileName = process.argv[3]
 
 
 
+
+function Compile(source:string):string{
+  const DATA:any = {}
+  
+  source = source.replace(/(.*)\=(.*)/gm,(match:any,name:string,value:string)=>{
+    DATA[name.trim()] = value.trim()
+    return ''
+  })
+
+  for(const key of Object.keys(DATA)){
+    source = source.replace(new RegExp('\\b'+key+'\\b','gm'),DATA[key])
+  }
+
+  return source
+}
+
+
+
+
+
 function writeUInt32LE(array:any, value:any, offset:any, comment:string|null=null) {
   array[offset] = value & 0xff;
   array[offset + 1] = (value >> 8) & 0xff;
@@ -49,6 +69,7 @@ export function generatePrintfExecutable(){
   }
 
   let source = fs.readFileSync(sourceFileName).toString()
+  source = Compile(source)
   source = Prepare(source)
   //fs.writeFileSync(destFileName.replace('.exe','.asm'), source);
 
