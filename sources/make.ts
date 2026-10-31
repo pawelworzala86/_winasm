@@ -2,7 +2,6 @@ import fs from 'fs'
 import parseInstruction from './mnemonic.ts'
 import parser from './opcode.ts'
 import Prepare from './prepare.ts'
-import { isWeakMap } from 'util/types'
 
 
 
