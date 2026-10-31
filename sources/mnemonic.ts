@@ -90,9 +90,8 @@ function parseInstruction(instr:any) {
         return "call rel32";
     }
 
-    const byMnemonic = instructions.find((entry:any) => entry.mnemonic.split(' ')[0] === mnemonic);
-    if (!byMnemonic) {
-        return null//byMnemonic.mnemonic;
+    if (!instructions.some((entry:any) => entry.mnemonic.split(' ')[0] === mnemonic)) {
+        return null;
     }
 
     const op1 = classifyOperand(op1raw ? op1raw.replace(/,$/, '') : null);
@@ -111,8 +110,21 @@ function parseInstruction(instr:any) {
         o1 = 'r/m64'
     }
 
-    if (o2) return `${mnemonic} ${o1}, ${o2}`;
-    return `${mnemonic} ${o1}`;
+    const signature = o2
+        ? `${mnemonic} ${o1}, ${o2}`
+        : `${mnemonic} ${o1}`;
+    if (instructions.some((entry:any) => entry.mnemonic === signature)) {
+        return signature;
+    }
+
+    if (o2 === "imm8") {
+        const widenedSignature = `${mnemonic} ${o1}, imm32`;
+        if (instructions.some((entry:any) => entry.mnemonic === widenedSignature)) {
+            return widenedSignature;
+        }
+    }
+
+    return signature;
 }
 
 console.log(parseInstruction('and rsp, -16'))

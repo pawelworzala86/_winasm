@@ -3,7 +3,7 @@
 
     VALAA = 1
 
-    invoke printf, addr format, addr msgA, valA
+    invoke printf, addr format, addr msgA, [valA]
 
     rvcall EndoFunc, addr helloTxt
 

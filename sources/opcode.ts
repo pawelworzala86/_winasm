@@ -17,7 +17,7 @@ class OpcodeParser {
     encodeOpcodePattern(pattern:any, operands:any, mnemonic:any) {
         pattern = pattern.replace(/\s*\+\s*/g, '+');
         const tokens = pattern.split(/\s+/);
-        let out = [];
+        let out: number[] = [];
 
         const needsExtendedRegister = (operands:any[]) => operands.some((operand:any) => {
             if (typeof operand !== 'string') return false;

@@ -77,14 +77,14 @@ export function Prepare(code:string){
                 let oper = 'mov'
                 if(param.indexOf('addr')>-1){
                     oper = 'lea'
-                    param = param.replace('addr','').trim()
+                    param = '['+param.replace('addr','').trim()+']'
                 }
-                return `${oper} ${REGS[reg++]}, [${param}]`
+                return `${oper} ${REGS[reg++]}, ${param}`
             }else{
                 if(params.length<=6){
-                    return `mov ${REGS6[reg++]}, [${param}]`
+                    return `mov ${REGS6[reg++]}, ${param}`
                 }else{
-                    return `mov ${REGS8[reg++]}, [${param}]`
+                    return `mov ${REGS8[reg++]}, ${param}`
                 }
             }
         })
