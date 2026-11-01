@@ -1,7 +1,7 @@
 .code
     VALAA = 1
 
-    invoke printf, addr format, addr msgA, [valA]
+    invoke printf, addr format, addr msgA, [valA], 5, 8
 
     rvcall EndoFunc, addr helloTxt
 
@@ -21,7 +21,7 @@
 .data
     LF = 13,10
     helloTxt db 'Hello World!!!',LF,0
-    format db 'msg %s %i',LF,0
+    format db 'msg %s %i %i %i',LF,0
     msgA db 'a',0
     valA dq 1
     formatA db 'msg %i',0
