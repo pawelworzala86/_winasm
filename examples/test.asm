@@ -18,7 +18,8 @@
     endp
 
 .data
-    helloTxt db 'Hello World!!!',0
+    LF = 13,10
+    helloTxt db 'Hello World!!!',LF,0
     format db 'msg %s %i',0
     msgA db 'a',0
     valA dq 1
