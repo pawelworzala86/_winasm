@@ -7,7 +7,10 @@
 
     rvcall EndoFunc, addr helloTxt
 
-    rvcall EndoFunc, addr helloTxt
+    invoke malloc, 8
+    mov [ptr], rax
+    mov [ptr+0], 11
+    invoke printf, addr formatA, [ptr+0]
 
     invoke ExitProcess
 
@@ -20,9 +23,12 @@
     format db 'msg %s %i',0
     msgA db 'a',0
     valA dq 1
+    formatA db 'msg %i',0
+    ptr dq 0
 
 .import
     import 'kernel32.dll',\
         ExitProcess,'ExitProcess'
     import 'msvcrt.dll',\
-        printf,'printf'
+        printf,'printf',\
+        malloc,'malloc'
