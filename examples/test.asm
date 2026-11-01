@@ -22,9 +22,7 @@
     valA dq 1
 
 .import
-    library kernel32,'kernel32.dll',\
-        msvcrt,'msvcrt.dll'
-    import kernel32,\
+    import 'kernel32.dll',\
         ExitProcess,'ExitProcess'
-    import msvcrt,\
+    import 'msvcrt.dll',\
         printf,'printf'

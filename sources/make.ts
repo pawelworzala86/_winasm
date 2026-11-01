@@ -384,24 +384,15 @@ export function generatePrintfExecutable(){
   function importFromData(data:string){
       data=data.replace(/\,\\\n/gm,',')
       data=data.replace(/\'/gm,'')
-      data.replace(/library.*/gm,(match:any):any=>{
-          let parts = match.replace('library','').trim().split(',').map((p:any)=>p.trim())
-          //console.log(parts)
-          for(let i=0;i<parts.length;i+=2){
-              addDLL(parts[i],parts[i+1])
-          }
-      })
       data.replace(/import.*/gm,(match:any):any=>{
           let parts = match.replace('import','').trim().split(',').map((p:any)=>p.trim())
           console.log(parts)
           let name = parts[0]
+          addDLL(name,name)
           for(let i=1;i<parts.length;i+=2){
-              //if(new RegExp('\\['+parts[i]+'\\]','gm').exec(dataTxt)){
-                  addDllFunc(name,parts[i],parts[i+1])
-              //}
+            addDllFunc(name,parts[i],parts[i+1])
           }
       })
-      //console.log(data)
   }
   importFromData(idataTxt)
   console.log('imp',imp)
