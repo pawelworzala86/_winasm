@@ -120,14 +120,18 @@ export function generatePrintfExecutable(){
     const parameters = rawParameters
       ? rawParameters.split(',').map((parameter:any) => parameter.trim())
       : []
-    const bytes = parser.encode(instr, parameters)
+    const encoded = parser.encodeDetailed(instr, parameters)
+    const bytes = encoded.bytes
     instructions.push({ line: index + 1, command: command.toLowerCase(), instr, parameters, offset: OFFSET, bytes })
 
-    parameters.forEach((param:any) => {
-      if (/^\[[a-z_.$][\w.$]*\]$/i.test(param)) {
-        const name = param.substring(1, param.length - 1)
-        REPLS.push({ expr: name.toLowerCase(), offset: OFFSET, length: bytes.length })
-      }
+    encoded.relocations.forEach((relocation:any) => {
+      REPLS.push({
+        expr: relocation.expression,
+        addend: relocation.addend,
+        instructionOffset: OFFSET,
+        displacementOffset: OFFSET + relocation.offset,
+        length: bytes.length
+      })
     })
     OFFSET += bytes.length
   })
@@ -613,19 +617,15 @@ export function generatePrintfExecutable(){
 
 
   for(const RP of REPLS){
-    if(DATASET[RP.expr] !== undefined){
-      const ripAfterLea    = RVA_TEXT_START + RP.offset + RP.length;
-      const offsetToHello  = DATASET[RP.expr] - ripAfterLea;
-      console.log('offsetToHello', offsetToHello);
-      const writeAddr = RP.offset + (RP.length-4)
-      writeUInt32LE(code, offsetToHello, writeAddr)
-      //console.log(offsetToHello, 0x0B);
-    }else{
-      const ripAfterPrintf = RVA_TEXT_START + RP.offset + RP.length;
-      const offsetToPrintf = iatAddresses[RP.expr] - ripAfterPrintf;
-      const writeAddr = RP.offset + (RP.length-4)
-      writeUInt32LE(code, offsetToPrintf, writeAddr);
+    const targetRva = DATASET[RP.expr] !== undefined
+      ? DATASET[RP.expr]
+      : iatAddresses[RP.expr];
+    if (targetRva === undefined) {
+      throw new Error(`Undefined memory symbol "${RP.expr}"`);
     }
+
+    const relativeOffset = targetRva + RP.addend - (RVA_TEXT_START + RP.instructionOffset + RP.length);
+    writeUInt32LE(code, relativeOffset, RP.displacementOffset);
   }
 
   exe.set(code, codeRawStart);

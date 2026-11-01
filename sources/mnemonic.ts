@@ -47,9 +47,6 @@ function classifyOperand(op:any) {
 
     // memory operand
     if (/^\[.*\]$/.test(op)) {
-        if(op.length==12){
-            return 'r/m64'
-        }
         return classifyMemory(op);
     }
 

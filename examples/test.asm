@@ -1,16 +1,15 @@
 .code
-    sub rsp, 40
-
     VALAA = 1
 
     invoke printf, addr format, addr msgA, [valA]
 
     rvcall EndoFunc, addr helloTxt
 
-    invoke malloc, 8
+    invoke malloc, 16
     mov [ptr], rax
     mov [ptr+0], 11
-    invoke printf, addr formatA, [ptr+0]
+    mov [ptr+8], 12
+    invoke printf, addr formatA, [ptr+8]
 
     invoke ExitProcess
 
