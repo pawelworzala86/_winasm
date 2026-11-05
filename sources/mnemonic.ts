@@ -124,6 +124,6 @@ function parseInstruction(instr:any) {
     return signature;
 }
 
-console.log(parseInstruction('and rsp, -16'))
+//console.log(parseInstruction('and rsp, -16'))
 
 export default parseInstruction

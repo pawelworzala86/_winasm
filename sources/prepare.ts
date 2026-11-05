@@ -10,12 +10,12 @@ export function Prepare(code:string){
         let file = match.split('\'')[1].trim()
         try{
             let p = path.resolve(sourceFileName,'../../cache/'+file)
-            console.log('include file... ',p)
+            //console.log('include file... ',p)
             const data = fs.readFileSync(p).toString()
             return data
         }catch(e){
             let p = path.resolve(sourceFileName,''+file)
-            console.log('include file... ',p)
+            //console.log('include file... ',p)
             const data = fs.readFileSync(p).toString()
             return data
         }
@@ -38,13 +38,13 @@ export function Prepare(code:string){
         return ''
     })
 
-    console.log(MACRO)
+    //console.log(MACRO)
 
     for(let MA of MACRO){
         code = code.replace(new RegExp('\\b'+MA.name+'\\b(.*)','gm'),match=>{
             //const name = match.split(' ')[0].trim()
             const params = match.replace(MA.name+' ','').split(',').map(t=>t.trim())
-            console.log(MA.name,params)
+            //console.log(MA.name,params)
             let result = MA.body
             params.map((param,i)=>{
                 result = result.replace(new RegExp('\\b'+MA.params[i]+'\\b','gm'),param)
@@ -149,13 +149,13 @@ export function Prepare(code:string){
     ret`
     })
 
-    console.log(PROCS)
+    //console.log(PROCS)
 
     /*for(let PR of PROCS){
         code = code.replace(new RegExp('\\b'+PR.name+'\\b(.*)','gm'),match=>{
             const name = match.split(' ')[0].trim()
             const params = match.replace(name+' ','').split(',').map(t=>t.trim())
-            console.log(name,params)
+            //console.log(name,params)
             let result = PR.body
             params.map((param,i)=>{
                 //result = result.replace(new RegExp('\\b'+PR.params[i]+'\\b','gm'),param)

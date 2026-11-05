@@ -146,7 +146,7 @@ export function Compile(source:string):Uint8Array {
   }
 
   let hex = assembledBytes.join('')
-  console.log('DATASET',DATASET)
+  //console.log('DATASET',DATASET)
 
 
   const codeRawStart = 0x200;
@@ -381,7 +381,7 @@ export function Compile(source:string):Uint8Array {
       data=data.replace(/\'/gm,'')
       data.replace(/import.*/gm,(match:any):any=>{
           let parts = match.replace('import','').trim().split(',').map((p:any)=>p.trim())
-          console.log(parts)
+          //(parts)
           let name = parts[0]
           addDLL(name,name)
           for(let i=1;i<parts.length;i+=2){
@@ -390,7 +390,7 @@ export function Compile(source:string):Uint8Array {
       })
   }
   importFromData(idataTxt)
-  console.log('imp',imp)
+  //console.log('imp',imp)
   const IAT_LAYOUT = []
   for(const key of Object.keys(imp)){
     IAT_LAYOUT.push(imp[key])
