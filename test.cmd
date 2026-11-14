@@ -1,5 +1,5 @@
-npm run test .\examples\test.asm .\dist\test.exe
+npm run test .\examples\window.asm .\dist\window.exe
 
 cd .\dist\
-test.exe
+window.exe
 cd ..
