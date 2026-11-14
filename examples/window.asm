@@ -1,40 +1,36 @@
 .code
     ; Wyrównanie stosu i alokacja shadow space (40 bajtów: 32 shadow + 8 wyrównanie)
-        sub     rsp, 40
-
-        invoke printf addr testVar
 
         ; GetModuleHandleA(NULL)
+        sub     rsp, 40
         xor     rcx, rcx
         call    [GetModuleHandleA]
+        add     rsp, 40
         mov     rsi, rax                ; rsi = hInstance
 
-        invoke printf addr testVar
-
         ; --- WYPEŁNIENIE I REJESTRACJA WNDCLASSEXA (80 bajtów) ---
-        sub     rsp, 80                 ; 80 jest wielokrotnością 16
-        mov     rdi, rsp
+        sub     rsp, 120                ; 32 bajty shadow space + 80 bajtów struktury + wyrównanie
+        lea     rdi, [rsp + 32]
         xor     al, al
         mov     ecx, 80
         rep     stosb
+        lea     rdi, [rsp + 32]
 
-        mov     dword [rsp + 0], 80     ; cbSize = 80
-        mov     dword [rsp + 4], 3      ; style = CS_HREDRAW | CS_VREDRAW
-        mov     qword [rsp + 8], WndProc; lpfnWndProc
-        mov     qword [rsp + 24], rsi   ; hInstance
-        mov     qword [rsp + 64], _className ; lpszClassName
+        mov     dword [rdi + 0], 80     ; cbSize = 80
+        mov     dword [rdi + 4], 3      ; style = CS_HREDRAW | CS_VREDRAW
+        mov     qword [rdi + 8], WndProc; lpfnWndProc
+        mov     qword [rdi + 24], rsi   ; hInstance
+        mov     qword [rdi + 64], _className ; lpszClassName
 
-        mov     rcx, rsp                ; wskaźnik na strukturę
+        mov     rcx, rdi                ; wskaźnik na strukturę
         call    [RegisterClassExA]
-        add     rsp, 80                 ; zwolnienie pamięci struktury
-
-        invoke printf addr testVar
+        add     rsp, 120                ; zwolnienie pamięci struktury
 
         ; --- TWORZENIE OKNA (CreateWindowExA) ---
         ; CreateWindowExA przyjmuje 12 argumentów:
         ; 1-4 w rcx, rdx, r8, r9
         ; 5-12 na stosie (wymaga 32 bajtów shadow space + 64 bajtów dla 8 argumentów = 96 bajtów)
-        sub     rsp, 96
+        sub     rsp, 104
         
         mov     rcx, 0                  ; dwExStyle
         mov     rdx, _className         ; lpClassName
@@ -52,31 +48,30 @@
         mov     qword [rsp + 88], 0     ; lpParam
 
         call    [CreateWindowExA]
-        add     rsp, 96
+        add     rsp, 104
 
-        invoke printf addr testVar
+        mov     rdi, rax                ; zachowaj hWnd przed wywołaniem printf
+        mov     rax, rdi
 
         test    rax, rax
         jz      exit
         mov     rdi, rax                ; rdi = hWnd
 
         ; --- POKAZANIE OKNA ---
-        sub     rsp, 32
+        sub     rsp, 40
         mov     rcx, rdi
         mov     rdx, 1                  ; SW_SHOWNORMAL
         call    [ShowWindow]
+        add     rsp, 40
 
-        invoke printf addr testVar
-
+        sub     rsp, 40
         mov     rcx, rdi
         call    [UpdateWindow]
-        add     rsp, 32
-
-        invoke printf addr testVar
+        add     rsp, 40
 
         ; --- PĘTLA KOMUNIKATÓW (MSG ma 48 bajtów na x64) ---
 msg_loop:
-        sub     rsp, 80                 ; 32 bajty shadow space + 48 bajtów na strukturę MSG
+        sub     rsp, 88                 ; 32 bajty shadow space + 48 bajtów na strukturę MSG + wyrównanie
         lea     rcx, [rsp + 32]         ; wskaźnik na bufor MSG
         xor     rdx, rdx
         xor     r8,  r8
@@ -84,9 +79,9 @@ msg_loop:
         call    [GetMessageA]
 
         test    eax, eax
-        jz      exit
+        jz      loop_exit
         cmp     eax, -1
-        je      exit
+        je      loop_exit
 
         lea     rcx, [rsp + 32]
         call    [TranslateMessage]
@@ -94,36 +89,39 @@ msg_loop:
         lea     rcx, [rsp + 32]
         call    [DispatchMessageA]
 
-        add     rsp, 80
+        add     rsp, 88
         jmp     msg_loop
 
+loop_exit:
+        add     rsp, 88
+        jmp     exit
+
 exit:
-        sub     rsp, 32
+        sub     rsp, 40
         xor     rcx, rcx
         call    [ExitProcess]
 
 
 ; --- PROCEDURA OKNA (WndProc) ---
 WndProc:
-        sub     rsp, 32                 ; shadow space dla wywołań wewnątrz
+        sub     rsp, 40                 ; shadow space i wyrównanie stosu
         cmp     rdx, 2                  ; WM_DESTROY = 2
         je      .wm_destroy
 
         call    [DefWindowProcA]
-        add     rsp, 32
+        add     rsp, 40
         ret
 
 .wm_destroy:
         xor     rcx, rcx
         call    [PostQuitMessage]
         xor     eax, eax                ; zwracamy 0
-        add     rsp, 32
+        add     rsp, 40
         ret
 
 .data
     _className  db 'MinimalClass64', 0
     _windowName db 'Fasmg Win64 Okno Bez Struktur', 0
-    testVar db 'test',0
 
 .import
     import 'kernel32.dll',\
