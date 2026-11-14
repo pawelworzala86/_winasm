@@ -353,6 +353,16 @@ export function Compile(source:string):Uint8Array {
       return;
     }
 
+    const label = line.match(/^([a-z_.$][\w.$]*):$/i);
+    if (label) {
+      const symbol = label[1].toLowerCase();
+      if (Object.hasOwn(DATASET, symbol)) {
+        throw new Error(`Duplicate data label "${label[1]}" on line ${index + 1}`);
+      }
+      DATASET[symbol] = stringHelloRva + dataOFFSET;
+      return;
+    }
+
     const declaration = line.match(/^([^\s]+)\s+(db|dw|dd|dq)\s+(.+)$/i);
     if (!declaration) {
       throw new Error(`Invalid data declaration on line ${index + 1}: ${line}`);

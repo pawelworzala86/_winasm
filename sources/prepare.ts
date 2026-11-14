@@ -49,6 +49,112 @@ function splitTopLevelCommaList(value:string): string[] {
     return parts
 }
 
+function expandStructs(code:string): string {
+    type StructMember = { name: string; declaration: string; offset: number }
+    const structs = new Map<string, StructMember[]>()
+    const structMemberOffsets = new Map<string, number>()
+    const output:string[] = []
+    const lines = code.split(/\r?\n/)
+    let currentStruct: { name: string; members: StructMember[]; line: number; size: number } | null = null
+    let openStructName: string | null = null
+    let section = ''
+
+    lines.forEach((line, index) => {
+        const content = line.split(';', 1)[0].trim()
+
+        if (currentStruct) {
+            if (/^end\s+struct$/i.test(content)) {
+                const key = currentStruct.name.toLowerCase()
+                if (structs.has(key)) {
+                    throw new Error(`Duplicate struct "${currentStruct.name}" on line ${currentStruct.line}`)
+                }
+                structs.set(key, currentStruct.members)
+                for (const member of currentStruct.members) {
+                    structMemberOffsets.set(`${key}.${member.name.toLowerCase()}`, member.offset)
+                }
+                currentStruct = null
+                openStructName = null
+                return
+            }
+
+            if (!content) return
+            const member = content.match(/^([a-z_.$][\w.$]*)\s+(db|dw|dd|dq)\s+(.+)$/i)
+            if (!member) {
+                throw new Error(`Invalid struct member on line ${index + 1}: ${content}`)
+            }
+            if (currentStruct.members.some(item => item.name.toLowerCase() === member[1].toLowerCase())) {
+                throw new Error(`Duplicate struct member "${member[1]}" on line ${index + 1}`)
+            }
+            const kind = member[2].toLowerCase()
+            const valueSize = kind === 'db' ? 1 : kind === 'dw' ? 2 : kind === 'dd' ? 4 : 8
+            const memberSize = splitTopLevelCommaList(member[3]).reduce((total, value) => {
+                if (kind === 'db' && value.startsWith("'") && value.endsWith("'")) {
+                    return total + new TextEncoder().encode(value.slice(1, -1)).length
+                }
+                return total + valueSize
+            }, 0)
+            currentStruct.members.push({
+                name: member[1],
+                declaration: `${member[2]} ${member[3]}`,
+                offset: currentStruct.size
+            })
+            currentStruct.size += memberSize
+            return
+        }
+
+        const structStart = content.match(/^struct\s+([a-z_.$][\w.$]*)$/i)
+        if (structStart) {
+            currentStruct = { name: structStart[1], members: [], line: index + 1, size: 0 }
+            openStructName = structStart[1]
+            return
+        }
+
+        if (/^\.data$/i.test(content)) {
+            section = 'data'
+        } else if (/^\.(?:code|import)$/i.test(content)) {
+            section = content.slice(1).toLowerCase()
+        }
+
+        if (section === 'data') {
+            const instance = content.match(/^([a-z_.$][\w.$]*)\s+([a-z_.$][\w.$]*)$/i)
+            const members = instance ? structs.get(instance[2].toLowerCase()) : undefined
+            if (instance && members) {
+                output.push(`${line.slice(0, line.indexOf(content))}${instance[1]}:`)
+                for (const member of members) {
+                    output.push(`${line.slice(0, line.indexOf(content))}${instance[1]}.${member.name} ${member.declaration}`)
+                }
+                return
+            }
+        }
+
+        output.push(line)
+    })
+
+    if (openStructName) {
+        throw new Error(`Struct "${openStructName}" is missing "end struct"`)
+    }
+
+    let outputSection = ''
+    return output.map(line => {
+        const content = line.split(';', 1)[0].trim()
+        if (/^\.data$/i.test(content)) {
+            outputSection = 'data'
+        } else if (/^\.(?:code|import)$/i.test(content)) {
+            outputSection = content.slice(1).toLowerCase()
+        }
+
+        if (outputSection !== 'code') return line
+        return line.replace(/\[([^\]]*)\]/g, (match, expression:string) => {
+            const offsetExpression = expression.match(/^(\s*r(?:ax|cx|dx|bx|sp|bp|si|di|[89]|1[0-5])\s*\+\s*)([a-z_.$][\w.$]*\.[a-z_.$][\w.$]*)(\s*)$/i)
+            if (!offsetExpression) return match
+
+            const offset = structMemberOffsets.get(offsetExpression[2].toLowerCase())
+            if (offset === undefined) return match
+            return `[${offsetExpression[1]}${offset}${offsetExpression[3]}]`
+        })
+    }).join('\n')
+}
+
 export function Prepare(code:string){
     const stringLiterals:any[] = []
 
@@ -114,6 +220,8 @@ export function Prepare(code:string){
             return result
         })
     }
+
+    code = expandStructs(code)
     //fs.writeFileSync('./prepared.asm', code)
 
     //process.exit()
