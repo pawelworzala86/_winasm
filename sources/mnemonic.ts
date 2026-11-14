@@ -54,6 +54,7 @@ function classifyOperand(op:any) {
     // register
     const reg = classifyRegister(op);
     if (reg) return reg;
+    if(/^xmm(?:[0-9]|1[0-5])$/i.test(op)) return "xmm";
 
     const sizedMemory = op.match(/^(byte|word|dword|qword)\s+(\[.*\])$/i);
     if (sizedMemory) {
@@ -137,6 +138,31 @@ function parseInstruction(instr:any) {
     if (op1 === "m" && op2) o1 = inferMemoryWidth(op1, op2);
     if (op2 === "m" && op1) o2 = inferMemoryWidth(op2, op1);
 
+    if(o1==='xmm'||o2==='xmm'){
+        const actualOperands = [o1,o2].filter((operand):operand is string=>typeof operand==='string')
+        const matchesOperand = (actual:string,expected:string)=>{
+            if(actual===expected) return true
+            if(actual==='xmm'&&expected.startsWith('xmm/m')) return true
+            if(actual==='r/m64'&&expected==='xmm/m64') return true
+            if(actual==='r/m32'&&expected==='xmm/m32') return true
+            if(actual==='r64'&&expected==='r/m64') return true
+            if(actual==='r32'&&expected==='r/m32') return true
+            return false
+        }
+        const sseInstruction = instructions.find((entry:any)=>{
+            const separator = entry.mnemonic.indexOf(' ')
+            const entryMnemonic = separator===-1?entry.mnemonic:entry.mnemonic.slice(0,separator)
+            const signature = separator===-1?[]:entry.mnemonic.slice(separator+1).split(/\s*,\s*/)
+            if(entryMnemonic!==mnemonic||signature.length!==actualOperands.length||!signature.some((operand:string)=>operand==='xmm'||operand.startsWith('xmm/'))){
+                return false
+            }
+            return signature.every((operand:string,index:number)=>matchesOperand(actualOperands[index],operand))
+        })
+        if(sseInstruction){
+            return sseInstruction.mnemonic
+        }
+    }
+
     if (o2 === "symbol") {
         o2 = o1.startsWith("r/m") ? "imm32" : o1 === "r64" ? "imm64" : "imm32";
     }
@@ -153,6 +179,22 @@ function parseInstruction(instr:any) {
         instructions.some((entry:any) => entry.mnemonic === `${mnemonic} r/m${o1.slice(1)}, ${o2}`)
     ) {
         o1 = `r/m${o1.slice(1)}`;
+    }
+
+    if(
+        o2==='r64'&&
+        instructions.some((entry:any)=>entry.mnemonic===`${mnemonic} ${o1}, r/m64`)
+    ){
+        o2='r/m64';
+    }
+
+    if(
+        !o2&&
+        o1.startsWith('r')&&
+        !o1.startsWith('r/')&&
+        instructions.some((entry:any)=>entry.mnemonic===`${mnemonic} r/m${o1.slice(1)}`)
+    ){
+        o1=`r/m${o1.slice(1)}`;
     }
 
     const signature = o2

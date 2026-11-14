@@ -37,7 +37,7 @@ class OpcodeParser {
         const appendModRM = (encoded:any, hasRex:boolean) => {
             const bytes = encoded.bytes;
             const rex = bytes[0];
-            let insertionOffset = out.length;
+            let relocationBase = out.length;
             let relocationOffset = encoded.relocation?.offset;
             if (hasRex) {
                 if (out[0] >= 0x40 && out[0] <= 0x4F) {
@@ -45,8 +45,17 @@ class OpcodeParser {
                     out.push(...bytes.slice(1));
                     if (relocationOffset !== undefined) relocationOffset--;
                 } else {
-                    out.unshift(...bytes);
-                    insertionOffset = 0;
+                    let prefixOffset = 0;
+                    while (
+                        prefixOffset < out.length &&
+                        [0xF0, 0xF2, 0xF3, 0x66, 0x67, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65].includes(out[prefixOffset])
+                    ){
+                        prefixOffset++;
+                    }
+                    out.splice(prefixOffset,0,rex);
+                    out.push(...bytes.slice(1));
+                    relocationBase++;
+                    if (relocationOffset !== undefined) relocationOffset--;
                 }
             } else {
                 out.push(...bytes);
@@ -54,7 +63,7 @@ class OpcodeParser {
             if (encoded.relocation) {
                 relocations.push({
                     ...encoded.relocation,
-                    offset: insertionOffset + relocationOffset
+                    offset: relocationBase + relocationOffset
                 });
             }
         };
@@ -256,6 +265,8 @@ class OpcodeParser {
     }
 
     regIndex(reg:any) {
+        const xmm = typeof reg === 'string' ? reg.match(/^xmm([0-9]|1[0-5])$/i) : null;
+        if (xmm) return Number(xmm[1]);
         const map:any = {
             al:0, cl:1, dl:2, bl:3, spl:4, bpl:5, sil:6, dil:7,
             r8b:8, r9b:9, r10b:10, r11b:11, r12b:12, r13b:13, r14b:14, r15b:15,
@@ -274,6 +285,7 @@ class OpcodeParser {
 
     regWidth(reg:any) {
         if (!reg || typeof reg !== 'string') return null;
+        if (/^xmm(?:[0-9]|1[0-5])$/i.test(reg)) return 128;
         if (/^(rax|rcx|rdx|rbx|rsp|rbp|rsi|rdi|r[89]|r1[0-5])$/.test(reg)) return 64;
         if (/^(eax|ecx|edx|ebx|esp|ebp|esi|edi|r[89]d|r1[0-5]d)$/.test(reg)) return 32;
         if (/^(ax|cx|dx|bx|sp|bp|si|di|r[89]w|r1[0-5]w)$/.test(reg)) return 16;

@@ -57,6 +57,7 @@ const instructions = [
     { mnemonic: "sub r/m32, imm32", opcode: "81 /5 id" },
     { mnemonic: "sub r/m64, imm32", opcode: "48 81 /5 id" },
     { mnemonic: "sub r/m64, imm8", opcode: "48 83 /5 ib" },
+    { mnemonic: "sub r64, r/m64", opcode: "48 2B /r" },
 
     { mnemonic: "inc r/m8", opcode: "FE /0" },
     { mnemonic: "inc r/m16", opcode: "FF /0" },
@@ -108,6 +109,8 @@ const instructions = [
     { mnemonic: "imul r/m16", opcode: "0F AF /r" },
     { mnemonic: "imul r/m32", opcode: "0F AF /r" },
     { mnemonic: "imul r/m64", opcode: "48 0F AF /r" },
+    { mnemonic: "imul r64, r/m64", opcode: "48 0F AF /r" },
+    { mnemonic: "idiv r/m64", opcode: "48 F7 /7" },
 
     { mnemonic: "div r/m8", opcode: "F6 /6" },
     { mnemonic: "div r/m32", opcode: "F7 /6" },
