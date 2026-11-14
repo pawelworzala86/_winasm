@@ -29,7 +29,7 @@
         ; --- TWORZENIE OKNA (CreateWindowExA) ---
         ; CreateWindowExA przyjmuje 12 argumentów:
         ; 1-4 w rcx, rdx, r8, r9
-        ; 5-12 na stosie (wymaga 32 bajtów shadow space + 64 bajtów dla 8 argumentów = 96 bajtów)
+        ; 5-12 na stosie: 32 bajty shadow space + 64 bajty argumentów + 8 bajtów wyrównania
         sub     rsp, 104
         
         mov     rcx, 0                  ; dwExStyle
