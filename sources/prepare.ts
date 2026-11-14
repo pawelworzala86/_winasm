@@ -49,18 +49,42 @@ function splitTopLevelCommaList(value:string): string[] {
     return parts
 }
 
-function expandStructs(code:string): string {
+function expandStructs(code:string): { code: string; methodCalls: Map<string, { label: string; instance: string }> } {
     type StructMember = { name: string; declaration: string; offset: number }
-    const structs = new Map<string, StructMember[]>()
+    type StructMethod = { name: string; parameters: string[]; body: string[] }
+    type StructDefinition = { name: string; members: StructMember[]; methods: StructMethod[] }
+    const structs = new Map<string, StructDefinition>()
     const structMemberOffsets = new Map<string, number>()
+    const methodCalls = new Map<string, { label: string; instance: string }>()
+    const methodDefinitions: Array<{ owner: string; method: StructMethod }> = []
     const output:string[] = []
     const lines = code.split(/\r?\n/)
-    let currentStruct: { name: string; members: StructMember[]; line: number; size: number } | null = null
+    let currentStruct: { name: string; members: StructMember[]; methods: StructMethod[]; line: number; size: number } | null = null
+    let currentMethod: { name: string; parameters: string[]; body: string[]; line: number } | null = null
     let openStructName: string | null = null
+    let openMethodName: string | null = null
     let section = ''
 
     lines.forEach((line, index) => {
         const content = line.split(';', 1)[0].trim()
+
+        if (currentMethod) {
+            if (/^endp$/i.test(content)) {
+                if (currentStruct!.methods.some(method => method.name.toLowerCase() === currentMethod!.name.toLowerCase())) {
+                    throw new Error(`Duplicate struct method "${currentMethod.name}" on line ${currentMethod.line}`)
+                }
+                currentStruct!.methods.push({
+                    name: currentMethod.name,
+                    parameters: currentMethod.parameters,
+                    body: currentMethod.body
+                })
+                currentMethod = null
+                openMethodName = null
+                return
+            }
+            currentMethod.body.push(line)
+            return
+        }
 
         if (currentStruct) {
             if (/^end\s+struct$/i.test(content)) {
@@ -68,16 +92,36 @@ function expandStructs(code:string): string {
                 if (structs.has(key)) {
                     throw new Error(`Duplicate struct "${currentStruct.name}" on line ${currentStruct.line}`)
                 }
-                structs.set(key, currentStruct.members)
+                const definition = {
+                    name: currentStruct.name,
+                    members: currentStruct.members,
+                    methods: currentStruct.methods
+                }
+                structs.set(key, definition)
                 for (const member of currentStruct.members) {
                     structMemberOffsets.set(`${key}.${member.name.toLowerCase()}`, member.offset)
                 }
+                methodDefinitions.push(...currentStruct.methods.map(method => ({ owner: currentStruct!.name, method })))
                 currentStruct = null
                 openStructName = null
                 return
             }
 
             if (!content) return
+            const method = content.match(/^proc\s+([a-z_.$][\w.$]*)(?:\s*,\s*(.*))?$/i)
+            if (method) {
+                const parameters = method[2] ? splitTopLevelCommaList(method[2]) : []
+                if (parameters.some(parameter => !/^[a-z_.$][\w.$]*$/i.test(parameter) || parameter.toLowerCase() === 'this')) {
+                    throw new Error(`Invalid struct method parameter on line ${index + 1}`)
+                }
+                if (new Set(parameters.map(parameter => parameter.toLowerCase())).size !== parameters.length) {
+                    throw new Error(`Duplicate struct method parameter on line ${index + 1}`)
+                }
+                currentMethod = { name: method[1], parameters, body: [], line: index + 1 }
+                openMethodName = method[1]
+                return
+            }
+
             const member = content.match(/^([a-z_.$][\w.$]*)\s+(db|dw|dd|dq)\s+(.+)$/i)
             if (!member) {
                 throw new Error(`Invalid struct member on line ${index + 1}: ${content}`)
@@ -104,7 +148,7 @@ function expandStructs(code:string): string {
 
         const structStart = content.match(/^struct\s+([a-z_.$][\w.$]*)$/i)
         if (structStart) {
-            currentStruct = { name: structStart[1], members: [], line: index + 1, size: 0 }
+            currentStruct = { name: structStart[1], members: [], methods: [], line: index + 1, size: 0 }
             openStructName = structStart[1]
             return
         }
@@ -117,11 +161,17 @@ function expandStructs(code:string): string {
 
         if (section === 'data') {
             const instance = content.match(/^([a-z_.$][\w.$]*)\s+([a-z_.$][\w.$]*)$/i)
-            const members = instance ? structs.get(instance[2].toLowerCase()) : undefined
-            if (instance && members) {
+            const definition = instance ? structs.get(instance[2].toLowerCase()) : undefined
+            if (instance && definition) {
                 output.push(`${line.slice(0, line.indexOf(content))}${instance[1]}:`)
-                for (const member of members) {
+                for (const member of definition.members) {
                     output.push(`${line.slice(0, line.indexOf(content))}${instance[1]}.${member.name} ${member.declaration}`)
+                }
+                for (const method of definition.methods) {
+                    methodCalls.set(`${instance[1]}.${method.name}`.toLowerCase(), {
+                        label: `${definition.name}.${method.name}`,
+                        instance: instance[1]
+                    })
                 }
                 return
             }
@@ -130,12 +180,131 @@ function expandStructs(code:string): string {
         output.push(line)
     })
 
+    if (openMethodName) {
+        throw new Error(`Struct method "${openMethodName}" is missing "endp"`)
+    }
     if (openStructName) {
         throw new Error(`Struct "${openStructName}" is missing "end struct"`)
     }
 
+    const replaceIdentifier = (line:string, name:string, replacement:string): string => {
+        let result = ''
+        let inString = false
+        for (let index = 0; index < line.length;) {
+            const character = line[index]
+            if (character === "'" && inString && line[index + 1] === "'") {
+                result += "''"
+                index += 2
+                continue
+            }
+            if (character === "'") {
+                inString = !inString
+                result += character
+                index += 1
+                continue
+            }
+            if (!inString && character === ';') {
+                result += line.slice(index)
+                break
+            }
+            if (!inString && /[a-z_.$]/i.test(character)) {
+                const token = line.slice(index).match(/^[a-z_.$][\w.$]*/i)![0]
+                result += token.toLowerCase() === name.toLowerCase() ? replacement : token
+                index += token.length
+                continue
+            }
+            result += character
+            index += 1
+        }
+        return result
+    }
+
+    const replaceThisMember = (line:string, owner:string): string => {
+        let result = ''
+        let inString = false
+        for (let index = 0; index < line.length;) {
+            const character = line[index]
+            if (character === "'" && inString && line[index + 1] === "'") {
+                result += "''"
+                index += 2
+                continue
+            }
+            if (character === "'") {
+                inString = !inString
+                result += character
+                index += 1
+                continue
+            }
+            if (!inString && character === ';') {
+                result += line.slice(index)
+                break
+            }
+            if (!inString && /[a-z_.$]/i.test(character)) {
+                const token = line.slice(index).match(/^[a-z_.$][\w.$]*/i)![0]
+                const member = token.match(/^this\.([a-z_.$][\w.$]*)$/i)
+                const offset = member
+                    ? structMemberOffsets.get(`${owner}.${member[1]}`.toLowerCase())
+                    : undefined
+                result += offset === undefined ? token : `[rsi+${offset}]`
+                index += token.length
+                continue
+            }
+            result += character
+            index += 1
+        }
+        return result
+    }
+
+    const methodCode = methodDefinitions.flatMap(({ owner, method }) => {
+        const parameterRegisters = ['rbx', 'rdi', 'r12']
+        const parameters = method.parameters.map((parameter, index) => ({
+            name: parameter,
+            replacement: index < parameterRegisters.length
+                ? parameterRegisters[index]
+                : `[rbp+${48 + (index - parameterRegisters.length) * 8}]`
+        }))
+        const savedRegisters = ['rsi', ...parameters.slice(0, parameterRegisters.length).map(parameter => parameter.replacement)]
+        const needsAlignmentPadding = savedRegisters.length % 2 !== 0
+        const prologue = [
+            ...savedRegisters.map(register => `push ${register}`),
+            ...(needsAlignmentPadding ? ['sub rsp, 8'] : []),
+            'mov rsi, rcx',
+            ...(parameters[0] ? [`mov ${parameters[0].replacement}, rdx`] : []),
+            ...(parameters[1] ? [`mov ${parameters[1].replacement}, r8`] : []),
+            ...(parameters[2] ? [`mov ${parameters[2].replacement}, r9`] : [])
+        ]
+        const epilogue = [
+            ...(needsAlignmentPadding ? ['add rsp, 8'] : []),
+            ...savedRegisters.slice().reverse().map(register => `pop ${register}`)
+        ]
+        const epilogueLabel = `${owner}.${method.name}.__exit`
+        const body = method.body.map(line => {
+            const returnStatement = line.match(/^(\s*)ret\s*(?:;.*)?$/i)
+            if (returnStatement) return `${returnStatement[1]}jmp ${epilogueLabel}`
+            let result = replaceThisMember(line, owner)
+            result = replaceIdentifier(result, 'this', 'rsi')
+            for (const parameter of parameters) {
+                result = replaceIdentifier(result, parameter.name, parameter.replacement)
+            }
+            return result
+        })
+        return [`proc ${owner}.${method.name}`, ...prologue, ...body, `${epilogueLabel}:`, ...epilogue, 'endp']
+    })
+
+    if (methodCode.length) {
+        const dataIndex = output.findIndex(line => /^\.data\b/i.test(line.trim()))
+        if (dataIndex === -1) {
+            if (!output.some(line => /^\.code\b/i.test(line.trim()))) output.push('.code')
+            output.push(...methodCode)
+        } else if (output.slice(0, dataIndex).some(line => /^\.code\b/i.test(line.trim()))) {
+            output.splice(dataIndex, 0, ...methodCode)
+        } else {
+            output.splice(dataIndex, 0, '.code', ...methodCode)
+        }
+    }
+
     let outputSection = ''
-    return output.map(line => {
+    const expandedCode = output.map(line => {
         const content = line.split(';', 1)[0].trim()
         if (/^\.data$/i.test(content)) {
             outputSection = 'data'
@@ -153,6 +322,8 @@ function expandStructs(code:string): string {
             return `[${offsetExpression[1]}${offset}${offsetExpression[3]}]`
         })
     }).join('\n')
+
+    return { code: expandedCode, methodCalls }
 }
 
 export function Prepare(code:string){
@@ -221,7 +392,8 @@ export function Prepare(code:string){
         })
     }
 
-    code = expandStructs(code)
+    const structureExpansion = expandStructs(code)
+    code = structureExpansion.code
     //fs.writeFileSync('./prepared.asm', code)
 
     //process.exit()
@@ -241,6 +413,11 @@ export function Prepare(code:string){
         let name = match.split(' ')[1].trim()
         let params:any = splitTopLevelCommaList(match.replace('invoke '+name+'',''))
         name = name.replace(',','').trim()
+        const methodCall = structureExpansion.methodCalls.get(name.toLowerCase())
+        if (methodCall) {
+            name = methodCall.label
+            params.unshift(`addr ${methodCall.instance}`)
+        }
         params = params.map((param:any)=>normalizeStringParameter(param))
         let reg = 0
         params = params.map((param:any,i:number)=>{
@@ -265,7 +442,7 @@ export function Prepare(code:string){
         }
         return `    sub rsp, ${sub}
     ${params.join('\n')}
-    call [${name}]
+    call ${methodCall ? name : `[${name}]`}
     add rsp, ${sub}`
     })
 
@@ -291,12 +468,15 @@ export function Prepare(code:string){
     const PROCS:any = []
 
     code = code.replace(/proc([\s\S]+?)endp/gm,match=>{
-        let name = match.split(' ')[1].trim()
-        let lines = match.split('\n')
-        let params = lines[0].replace('proc '+name,'').trim().split('\n')[0].split(',').map(t=>t.trim()).filter(p=>p.length)
-        match = match.replace(/^proc (.*)/gm,'')
-        match = match.replace(/endp$/gm,'')
-        match = match.trim()
+        const lines = match.split(/\r?\n/)
+        const header = lines[0].trim().match(/^proc\s+([^\s,]+)(?:\s*,\s*(.*)|\s+(.+))?$/i)
+        if (!header) {
+            throw new Error(`Invalid procedure declaration: ${lines[0].trim()}`)
+        }
+        const name = header[1]
+        const parameterText = header[2] || header[3] || ''
+        const params = parameterText ? splitTopLevelCommaList(parameterText) : []
+        match = lines.slice(1, -1).join('\n').trim()
 
         const shadowSpace = 32 + (params.length % 2) * 8
         params.map((param,i)=>{
