@@ -18,7 +18,25 @@ function CompileF(source:string):string{
   })
 
   for(const key of Object.keys(DATA)){
-    source = source.replace(new RegExp('\\b'+key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gim'),DATA[key])
+    source = source.replace(
+      new RegExp('\\b'+key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gim'),
+      (match:string, offset:number, wholeSource:string) => {
+        const lineStart = wholeSource.lastIndexOf('\n', offset) + 1
+        const linePrefix = wholeSource.slice(lineStart, offset)
+        const precedingText = wholeSource.slice(0, offset)
+        const inString = (precedingText.match(/'/g) || []).length % 2 !== 0
+
+        if (
+          inString ||
+          /^\s*$/.test(linePrefix) ||
+          /\baddr\s*$/i.test(linePrefix) ||
+          /\[\s*$/.test(linePrefix)
+        ) {
+          return match
+        }
+        return DATA[key]
+      }
+    )
   }
 
   return source
@@ -302,13 +320,26 @@ export function Compile(source:string):Uint8Array {
     const values: string[] = [];
     let start = 0;
     let inString = false;
+    let bracketDepth = 0;
 
     for (let index = 0; index < value.length; index++) {
-      if (value[index] === "'") {
-        inString = !inString;
-      } else if (value[index] === ',' && !inString) {
-        values.push(value.slice(start, index).trim());
-        start = index + 1;
+      const character = value[index];
+      if (character === "'") {
+        const previous = value[index - 1];
+        if (inString && previous !== '\\') {
+          inString = false;
+        } else if (!inString) {
+          inString = true;
+        }
+      } else if (!inString) {
+        if (character === '[') {
+          bracketDepth += 1;
+        } else if (character === ']') {
+          bracketDepth = Math.max(0, bracketDepth - 1);
+        } else if (character === ',' && bracketDepth === 0) {
+          values.push(value.slice(start, index).trim());
+          start = index + 1;
+        }
       }
     }
 

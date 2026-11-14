@@ -1,10 +1,72 @@
 import fs from 'fs'
 import path from 'path'
 
-let sourceFileName = process.argv[2]
+let sourceFileName = process.argv[2] || ''
 sourceFileName = sourceFileName.replace(/[a-zA-Z0-9\_]+\.asm/gm,'')
 
+function splitTopLevelCommaList(value:string): string[] {
+    const parts:string[] = []
+    let current = ''
+    let inString = false
+    let bracketDepth = 0
+
+    for (let index = 0; index < value.length; index++) {
+        const character = value[index]
+
+        if (character === "'") {
+            const previous = value[index - 1]
+            if (inString && previous !== '\\') {
+                inString = false
+            } else if (!inString) {
+                inString = true
+            }
+            current += character
+            continue
+        }
+
+        if (!inString) {
+            if (character === '[') {
+                bracketDepth++
+            } else if (character === ']') {
+                bracketDepth = Math.max(0, bracketDepth - 1)
+            } else if (character === ',' && bracketDepth === 0) {
+                const trimmed = current.trim()
+                if (trimmed.length) {
+                    parts.push(trimmed)
+                }
+                current = ''
+                continue
+            }
+        }
+
+        current += character
+    }
+
+    const finalValue = current.trim()
+    if (finalValue.length) {
+        parts.push(finalValue)
+    }
+    return parts
+}
+
 export function Prepare(code:string){
+    const stringLiterals:any[] = []
+
+    const makeStringLabel = (literal:string) => {
+        const safeLabel = `__str_${stringLiterals.length}`
+        const text = literal.substring(1, literal.length - 1).replace(/'/g, "''")
+        stringLiterals.push(`${safeLabel} db '${text}',0`)
+        return safeLabel
+    }
+
+    const normalizeStringParameter = (param:string) => {
+        const trimmed = param.trim()
+        const target = trimmed.replace(/^addr\s+/i, '').trim()
+        if (target.startsWith("'") && target.endsWith("'")) {
+            return `addr ${makeStringLabel(target)}`
+        }
+        return trimmed
+    }
 
     code = code.replace(/include .*/gm,match=>{
         let file = match.split('\'')[1].trim()
@@ -69,8 +131,9 @@ export function Prepare(code:string){
 
     code = code.replace(/invoke .*/gm,match=>{
         let name = match.split(' ')[1].trim()
-        let params:any = match.replace('invoke '+name+'','').split(',').map(t=>t.trim()).filter(p=>p.length)
+        let params:any = splitTopLevelCommaList(match.replace('invoke '+name+'',''))
         name = name.replace(',','').trim()
+        params = params.map((param:any)=>normalizeStringParameter(param))
         let reg = 0
         params = params.map((param:any,i:number)=>{
             if(i<4){
@@ -100,8 +163,9 @@ export function Prepare(code:string){
 
     code = code.replace(/rvcall .*/gm,match=>{
         let name = match.split(' ')[1].trim()
-        let params = match.replace('rvcall '+name+'','').split(',').map(t=>t.trim()).filter(p=>p.length)
+        let params = splitTopLevelCommaList(match.replace('rvcall '+name+'',''))
         name = name.replace(',','').trim()
+        params = params.map((param:any)=>normalizeStringParameter(param))
         let reg = 0
         const pushes = params.map((param,i)=>{
             if(param.indexOf('addr')>-1){
@@ -163,6 +227,15 @@ export function Prepare(code:string){
             return result
         })
     }*/
+
+    if(stringLiterals.length){
+        const dataBlock = stringLiterals.map(line => `    ${line}`).join('\n')
+        if(/(^|\n)\s*\.data\b/m.test(code)){
+            code = code.replace(/(^|\n)(\s*\.data\b)/m, `$1$2\n${dataBlock}`)
+        }else{
+            code += `\n.data\n${dataBlock}\n`
+        }
+    }
 
     code = code.replace(/\[\[/gm,'[')
     code = code.replace(/\]\]/gm,']')
