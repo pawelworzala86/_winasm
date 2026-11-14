@@ -49,6 +49,49 @@ function splitTopLevelCommaList(value:string): string[] {
     return parts
 }
 
+function replaceProcedureIdentifier(line:string, name:string, replacement:string): string {
+    let result = ''
+    let inString = false
+    let bracketDepth = 0
+
+    for (let index = 0; index < line.length;) {
+        const character = line[index]
+        if (character === "'" && inString && line[index + 1] === "'") {
+            result += "''"
+            index += 2
+            continue
+        }
+        if (character === "'") {
+            inString = !inString
+            result += character
+            index++
+            continue
+        }
+        if (!inString && character === ';') {
+            result += line.slice(index)
+            break
+        }
+        if (!inString && character === '[') bracketDepth++
+        if (!inString && character === ']') bracketDepth = Math.max(0, bracketDepth - 1)
+
+        if (!inString && /[a-z_.$]/i.test(character)) {
+            const token = line.slice(index).match(/^[a-z_.$][\w.$]*/i)![0]
+            const substituted = token.toLowerCase() === name.toLowerCase()
+                ? (bracketDepth > 0 && replacement.startsWith('[') && replacement.endsWith(']')
+                    ? replacement.slice(1, -1)
+                    : replacement)
+                : token
+            result += substituted
+            index += token.length
+            continue
+        }
+        result += character
+        index++
+    }
+
+    return result
+}
+
 function expandStructs(code:string): { code: string; methodCalls: Map<string, { label: string; instance: string }> } {
     type StructMember = { name: string; declaration: string; offset: number }
     type StructMethod = { name: string; parameters: string[]; body: string[] }
@@ -405,6 +448,76 @@ export function Prepare(code:string){
         return match
     })*/
 
+    code = code.replace(/proc([\s\S]+?)endp/gm,match=>{
+        const lines = match.split(/\r?\n/)
+        const header = lines[0].trim().match(/^proc\s+([^\s,]+)(?:\s*,\s*(.*)|\s+(.+))?$/i)
+        if (!header) {
+            throw new Error(`Invalid procedure declaration: ${lines[0].trim()}`)
+        }
+        const name = header[1]
+        const params = (header[2] || header[3] || '')
+        const parameters = params ? splitTopLevelCommaList(params) : []
+        const parameterNames = new Set(parameters.map(parameter => parameter.toLowerCase()))
+        let localBytes = 0
+        const locals = new Map<string, { offset: number }>()
+        const initializers:string[] = []
+        const bodyLines = lines.slice(1, -1).flatMap(line => {
+            const content = line.split(';', 1)[0].trim()
+            if (!/^local\b/i.test(content)) return [line]
+
+            const declaration = content.match(/^local\s+([a-z_.$][\w.$]*)\s+(db|dw|dd|dq)(?:\s+(.+))?$/i)
+            if (!declaration) {
+                throw new Error(`Invalid local declaration in procedure "${name}": ${content}`)
+            }
+            const [, localName, rawKind, initializer] = declaration
+            const key = localName.toLowerCase()
+            if (parameterNames.has(key) || locals.has(key)) {
+                throw new Error(`Duplicate procedure variable "${localName}" in "${name}"`)
+            }
+
+            const kind = rawKind.toLowerCase()
+            const size = kind === 'db' ? 1 : kind === 'dw' ? 2 : kind === 'dd' ? 4 : 8
+            const values = initializer ? splitTopLevelCommaList(initializer) : []
+            localBytes = Math.ceil(localBytes / size) * size
+            localBytes += size * Math.max(values.length, 1)
+            locals.set(key, { offset: localBytes })
+
+            const memorySize = kind === 'db' ? 'byte' : kind === 'dw' ? 'word' : kind === 'dd' ? 'dword' : 'qword'
+            values.forEach((value, index) => {
+                const offset = localBytes - size * index
+                initializers.push(`mov ${memorySize} [rbp-${offset}], ${value}`)
+            })
+            return []
+        })
+
+        let body = bodyLines.join('\n')
+        parameters.forEach((parameter, index) => {
+            const stackOffset = 16 + 32 + (parameters.length % 2) * 8 + (parameters.length - index - 1) * 8
+            body = body.split(/\r?\n/).map(line =>
+                replaceProcedureIdentifier(line, parameter, `[rbp+${stackOffset}]`)
+            ).join('\n')
+        })
+        for (const [localName, local] of locals) {
+            body = body.split(/\r?\n/).map(line =>
+                replaceProcedureIdentifier(line, localName, `[rbp-${local.offset}]`)
+            ).join('\n')
+        }
+
+        const frameSize = parameters.length * 8 + localBytes
+        return `${name}:
+    push rbp
+    mov rbp, rsp
+    sub rsp, ${frameSize}
+${initializers.length ? `\n    ${initializers.join('\n    ')}\n` : ''}
+    ${body}
+
+    add rsp, ${frameSize}
+    mov rsp, rbp
+    pop rbp
+
+    ret`
+    })
+
     const REGS = ['rcx','rdx','r8','r9']
     const REGS6 = ['rcx','rdx','r8','r9','[rsp+32]','[rsp+24]']
     const REGS8 = ['rcx','rdx','r8','r9','[rsp+32]','[rsp+40]','[rsp+48]','[rsp+56]']
@@ -422,10 +535,14 @@ export function Prepare(code:string){
         let reg = 0
         params = params.map((param:any,i:number)=>{
             if(i<4){
+                const address = param.match(/^addr\s+(.+)$/i)
                 let oper = 'mov'
-                if(param.indexOf('addr')>-1){
+                if(address){
                     oper = 'lea'
-                    param = '['+param.replace('addr','').trim()+']'
+                    const target = address[1].trim()
+                    param = target.startsWith('[') && target.endsWith(']')
+                        ? target
+                        : `[${target}]`
                 }
                 return `${oper} ${REGS[reg++]}, ${param}`
             }else{
@@ -453,10 +570,15 @@ export function Prepare(code:string){
         params = params.map((param:any)=>normalizeStringParameter(param))
         let reg = 0
         const pushes = params.map((param,i)=>{
-            if(param.indexOf('addr')>-1){
-                return `lea rax, [${param.replace('addr','').trim()}]\npush rax`
+            const address = param.match(/^addr\s+(.+)$/i)
+            if(address){
+                const target = address[1].trim()
+                const operand = target.startsWith('[') && target.endsWith(']')
+                    ? target
+                    : `[${target}]`
+                return `lea rax, ${operand}\npush rax`
             }
-            return `push [${param}]`
+            return `push ${param.startsWith('[') && param.endsWith(']') ? param : `[${param}]`}`
         })
         const shadowSpace = 32 + (params.length % 2) * 8
         return `    ${pushes.join('\n')}
@@ -464,57 +586,6 @@ export function Prepare(code:string){
     call ${name}
     add rsp, ${shadowSpace + params.length * 8}`
     })
-
-    const PROCS:any = []
-
-    code = code.replace(/proc([\s\S]+?)endp/gm,match=>{
-        const lines = match.split(/\r?\n/)
-        const header = lines[0].trim().match(/^proc\s+([^\s,]+)(?:\s*,\s*(.*)|\s+(.+))?$/i)
-        if (!header) {
-            throw new Error(`Invalid procedure declaration: ${lines[0].trim()}`)
-        }
-        const name = header[1]
-        const parameterText = header[2] || header[3] || ''
-        const params = parameterText ? splitTopLevelCommaList(parameterText) : []
-        match = lines.slice(1, -1).join('\n').trim()
-
-        const shadowSpace = 32 + (params.length % 2) * 8
-        params.map((param,i)=>{
-            match = match.replace(new RegExp('\\b'+param+'\\b','gm'),match=>{
-                const stackOffset = 16 + shadowSpace + (params.length - i - 1) * 8
-                return `[rbp+${stackOffset}]`
-            })
-        })
-
-        PROCS.push({name,params,body:match})
-        return `${name}:
-    push rbp
-    mov rbp, rsp
-    sub rsp, ${params.length*8}
-
-    ${match}
-
-    add rsp, ${params.length*8}
-    mov rsp, rbp
-    pop rbp
-
-    ret`
-    })
-
-    //console.log(PROCS)
-
-    /*for(let PR of PROCS){
-        code = code.replace(new RegExp('\\b'+PR.name+'\\b(.*)','gm'),match=>{
-            const name = match.split(' ')[0].trim()
-            const params = match.replace(name+' ','').split(',').map(t=>t.trim())
-            //console.log(name,params)
-            let result = PR.body
-            params.map((param,i)=>{
-                //result = result.replace(new RegExp('\\b'+PR.params[i]+'\\b','gm'),param)
-            })
-            return result
-        })
-    }*/
 
     if(stringLiterals.length){
         const dataBlock = stringLiterals.map(line => `    ${line}`).join('\n')

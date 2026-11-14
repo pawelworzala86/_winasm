@@ -14,10 +14,17 @@
     mov [ptr], rax
     invoke printf, addr formatA, [ptr+8]
 
+    rvcall EndoFunc2
+
     invoke ExitProcess
 
     proc EndoFunc hello
         invoke printf, hello
+    endp
+
+    proc EndoFunc2
+        local testProp dq 123
+        invoke printf, addr formatA, [testProp]
     endp
 
 .data

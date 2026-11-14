@@ -116,6 +116,7 @@ function parseInstruction(instr:any) {
     if (
         op1raw &&
         !op2raw &&
+        classifyRegister(op1raw) === null &&
         /^[a-z_.$][\w.$]*$/i.test(op1raw) &&
         instructions.some((entry:any) => entry.mnemonic === `${mnemonic} rel32`)
     ) {
