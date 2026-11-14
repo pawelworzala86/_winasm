@@ -19,7 +19,7 @@ const instructions = [
     { mnemonic: "mov r8, imm8", opcode: "B0 + rb" },
     { mnemonic: "mov r16, imm16", opcode: "B8 + rw" },
     { mnemonic: "mov r32, imm32", opcode: "B8 + rd" },
-    { mnemonic: "mov r64, imm64", opcode: "48 B8 + rq" },
+    { mnemonic: "mov r64, imm64", opcode: "B8 + rq" },
 
     { mnemonic: "mov r/m64, imm64", opcode: "48 C7 /0 id" },  // pseudo, imm64 = 8 bytes
 
@@ -89,6 +89,7 @@ const instructions = [
     { mnemonic: "xor r/m8, imm8", opcode: "80 /6 ib" },
     { mnemonic: "xor r/m32, imm32", opcode: "81 /6 id" },
     { mnemonic: "xor r/m64, imm32", opcode: "48 81 /6 id" },
+    { mnemonic: "xor r/m8, r8", opcode: "30 /r" },
     { mnemonic: "xor r32, r32", opcode: "31 /r" },
     { mnemonic: "xor r/m64, r64", opcode: "48 31 /r" },
 
@@ -694,16 +695,21 @@ const instructions = [
 
     { mnemonic: "cmp r32, r/m32", opcode: "3B /r" },
     { mnemonic: "cmp r/m32, r32", opcode: "39 /r" },
-
+    { mnemonic: "cmp r32, imm32", opcode: "81 /7 id" },
+    { mnemonic: "cmp r/m32, imm32", opcode: "81 /7 id" },
     { mnemonic: "cmp r64, r/m64", opcode: "48 3B /r" },
     { mnemonic: "cmp r/m64, r64", opcode: "48 39 /r" },
+    { mnemonic: "cmp r64, imm32", opcode: "48 81 /7 id" },
+    { mnemonic: "cmp r/m64, imm32", opcode: "48 81 /7 id" },
 
 
 
     { mnemonic: "test r8, r/m8", opcode: "84 /r" },
     { mnemonic: "test r16, r/m16", opcode: "85 /r" },
     { mnemonic: "test r32, r/m32", opcode: "85 /r" },
+    { mnemonic: "test r32, r32", opcode: "85 /r" },
     { mnemonic: "test r64, r/m64", opcode: "48 85 /r" },
+    { mnemonic: "test r64, r64", opcode: "48 85 /r" },
 
 
 

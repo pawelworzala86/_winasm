@@ -2,10 +2,14 @@
     ; Wyrównanie stosu i alokacja shadow space (40 bajtów: 32 shadow + 8 wyrównanie)
         sub     rsp, 40
 
+        invoke printf addr testVar
+
         ; GetModuleHandleA(NULL)
         xor     rcx, rcx
         call    [GetModuleHandleA]
         mov     rsi, rax                ; rsi = hInstance
+
+        invoke printf addr testVar
 
         ; --- WYPEŁNIENIE I REJESTRACJA WNDCLASSEXA (80 bajtów) ---
         sub     rsp, 80                 ; 80 jest wielokrotnością 16
@@ -23,6 +27,8 @@
         mov     rcx, rsp                ; wskaźnik na strukturę
         call    [RegisterClassExA]
         add     rsp, 80                 ; zwolnienie pamięci struktury
+
+        invoke printf addr testVar
 
         ; --- TWORZENIE OKNA (CreateWindowExA) ---
         ; CreateWindowExA przyjmuje 12 argumentów:
@@ -48,6 +54,8 @@
         call    [CreateWindowExA]
         add     rsp, 96
 
+        invoke printf addr testVar
+
         test    rax, rax
         jz      exit
         mov     rdi, rax                ; rdi = hWnd
@@ -58,9 +66,13 @@
         mov     rdx, 1                  ; SW_SHOWNORMAL
         call    [ShowWindow]
 
+        invoke printf addr testVar
+
         mov     rcx, rdi
         call    [UpdateWindow]
         add     rsp, 32
+
+        invoke printf addr testVar
 
         ; --- PĘTLA KOMUNIKATÓW (MSG ma 48 bajtów na x64) ---
 msg_loop:
@@ -111,6 +123,7 @@ WndProc:
 .data
     _className  db 'MinimalClass64', 0
     _windowName db 'Fasmg Win64 Okno Bez Struktur', 0
+    testVar db 'test',0
 
 .import
     import 'kernel32.dll',\

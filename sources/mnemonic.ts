@@ -17,12 +17,27 @@ function classifyRegister(reg:any) {
 }
 
 function classifyImmediate(val:any) {
-    const v = Number(val);
+    const v = parseNumericValue(val);
+    if (v === null) return null;
 
     if (v >= -128 && v <= 255) return "imm8";
     if (v >= -32768 && v <= 65535) return "imm16";
     if (v >= -2147483648 && v <= 4294967295) return "imm32";
     return "imm64";
+}
+
+function parseNumericValue(value:any): number | null {
+    if (typeof value !== "string") return null;
+    const normalized = value.replace(/[ui]$/i, "");
+    if (/^-?0x[0-9a-f]+$/i.test(normalized)) return Number(normalized);
+    if (/^-?[0-9a-f]+h$/i.test(normalized)) {
+        const negative = normalized.startsWith("-");
+        const digits = normalized.replace(/^-?/, "").slice(0, -1);
+        const parsed = Number.parseInt(digits, 16);
+        return negative ? -parsed : parsed;
+    }
+    if (/^-?\d+$/.test(normalized)) return Number(normalized);
+    return null;
 }
 
 function classifyMemory(op:any) {
@@ -40,8 +55,14 @@ function classifyOperand(op:any) {
     const reg = classifyRegister(op);
     if (reg) return reg;
 
+    const sizedMemory = op.match(/^(byte|word|dword|qword)\s+(\[.*\])$/i);
+    if (sizedMemory) {
+        const width = { byte: 8, word: 16, dword: 32, qword: 64 }[sizedMemory[1].toLowerCase() as 'byte' | 'word' | 'dword' | 'qword'];
+        return `r/m${width}`;
+    }
+
     // immediate
-    if (/^-?\d+$/.test(op)) {
+    if (parseNumericValue(op) !== null) {
         return classifyImmediate(op);
     }
 
@@ -50,6 +71,7 @@ function classifyOperand(op:any) {
         return classifyMemory(op);
     }
 
+    if (/^[a-z_.$][\w.$]*$/i.test(op)) return "symbol";
     return null;
 }
 
@@ -63,36 +85,48 @@ function inferMemoryWidth(memType:any, otherType:any) {
 function parseInstruction(instr:any) {
     if (typeof instr !== 'string') return null;
 
-    const trimmed = instr.trim().toLowerCase();
+    let trimmed = instr.trim().toLowerCase();
     if (!trimmed) return null;
 
-    const parts = trimmed.split(/\s+/).filter(Boolean);
-    const [mnemonic, op1raw, op2raw] = parts;
+    const alias = { je: 'jz', jne: 'jnz' } as Record<string, string>;
+    const [firstToken, ...remainingTokens] = trimmed.split(/\s+/).filter(Boolean);
+    trimmed = [alias[firstToken] || firstToken, ...remainingTokens].join(' ');
+
+    if (instructions.some((entry:any) => entry.mnemonic === trimmed)) {
+        return trimmed;
+    }
+
+    const mnemonicEnd = trimmed.search(/\s/);
+    const mnemonic = mnemonicEnd === -1 ? trimmed : trimmed.slice(0, mnemonicEnd);
+    const operandsText = mnemonicEnd === -1 ? '' : trimmed.slice(mnemonicEnd).trim();
+    const operands = operandsText ? operandsText.split(',').map((operand:any) => operand.trim()) : [];
+    const [op1raw, op2raw] = operands;
 
     if (mnemonic === "ret") {
-        if (parts.length === 1) return "ret";
-        if (parts.length === 2 && /^\d+$/.test(op1raw) && Number(op1raw) <= 0xFFFF) {
+        if (operands.length === 0) return "ret";
+        if (operands.length === 1 && /^\d+$/.test(op1raw) && Number(op1raw) <= 0xFFFF) {
             return "ret imm16";
         }
         return null;
     }
 
-    if (parts.length < 2) return null;
+    if (operands.length === 0) return null;
 
-    if (mnemonic === "jmp" && /^[a-z_.$][\w.$]*$/i.test(op1raw) && !op2raw) {
-        return "jmp rel32";
-    }
-
-    if (mnemonic === "call" && /^[a-z_.$][\w.$]*$/i.test(op1raw) && !op2raw) {
-        return "call rel32";
+    if (
+        op1raw &&
+        !op2raw &&
+        /^[a-z_.$][\w.$]*$/i.test(op1raw) &&
+        instructions.some((entry:any) => entry.mnemonic === `${mnemonic} rel32`)
+    ) {
+        return `${mnemonic} rel32`;
     }
 
     if (!instructions.some((entry:any) => entry.mnemonic.split(' ')[0] === mnemonic)) {
         return null;
     }
 
-    const op1 = classifyOperand(op1raw ? op1raw.replace(/,$/, '') : null);
-    const op2 = op2raw ? classifyOperand(op2raw.replace(/,$/, '')) : null;
+    const op1 = classifyOperand(op1raw || null);
+    const op2 = op2raw ? classifyOperand(op2raw) : null;
 
     if (!op1 || (op2raw && op2 === null)) return null;
 
@@ -103,8 +137,22 @@ function parseInstruction(instr:any) {
     if (op1 === "m" && op2) o1 = inferMemoryWidth(op1, op2);
     if (op2 === "m" && op1) o2 = inferMemoryWidth(op2, op1);
 
-    if((o1=='r64')&&(o2!='r/m64')){
-        o1 = 'r/m64'
+    if (o2 === "symbol") {
+        o2 = o1.startsWith("r/m") ? "imm32" : o1 === "r64" ? "imm64" : "imm32";
+    }
+
+    if (mnemonic === "mov" && o1 === "r64" && o2?.startsWith("imm")) {
+        o2 = "imm64";
+    }
+
+    if (
+        o1.startsWith("r") &&
+        !o1.startsWith("r/") &&
+        o2 &&
+        !instructions.some((entry:any) => entry.mnemonic === `${mnemonic} ${o1}, ${o2}`) &&
+        instructions.some((entry:any) => entry.mnemonic === `${mnemonic} r/m${o1.slice(1)}, ${o2}`)
+    ) {
+        o1 = `r/m${o1.slice(1)}`;
     }
 
     const signature = o2
@@ -114,7 +162,7 @@ function parseInstruction(instr:any) {
         return signature;
     }
 
-    if (o2 === "imm8") {
+    if (o2?.startsWith("imm") && o2 !== "imm32") {
         const widenedSignature = `${mnemonic} ${o1}, imm32`;
         if (instructions.some((entry:any) => entry.mnemonic === widenedSignature)) {
             return widenedSignature;

@@ -287,12 +287,17 @@ class OpcodeParser {
             return typeof numericOperand === "number" ? numericOperand : Number(numericOperand);
         }
 
-        const stringOperand = operands.find((x:any) => typeof x === "string" && /^(-?\d+|0x[0-9a-fA-F]+|-?\d+u|-?\d+i)$/.test(x));
+        const stringOperand = operands.find((x:any) => typeof x === "string" && /^-?(?:\d+|0x[0-9a-f]+|[0-9a-f]+h)(?:u|i)?$/i.test(x));
         if (stringOperand !== undefined) {
-            if (/^0x[0-9a-fA-F]+$/.test(stringOperand)) return parseInt(stringOperand, 16);
-            if (/^-?\d+$/.test(stringOperand)) return parseInt(stringOperand, 10);
-            if (/^-?\d+u$/.test(stringOperand)) return parseInt(stringOperand.replace(/u$/, ''), 10);
-            if (/^-?\d+i$/.test(stringOperand)) return parseInt(stringOperand.replace(/i$/, ''), 10);
+            const normalized = stringOperand.replace(/[ui]$/i, '');
+            if (/^-?0x[0-9a-f]+$/i.test(normalized)) return Number(normalized);
+            if (/^-?[0-9a-f]+h$/i.test(normalized)) {
+                const negative = normalized.startsWith('-');
+                const digits = normalized.replace(/^-?/, '').slice(0, -1);
+                const value = Number.parseInt(digits, 16);
+                return negative ? -value : value;
+            }
+            if (/^-?\d+$/.test(normalized)) return Number(normalized);
         }
 
         return 0;
@@ -318,21 +323,24 @@ class OpcodeParser {
     }
 
     encodeImm64(operands:any) {
-        const val = operands.find((x:any) => typeof x === "bigint" || typeof x === "number" || typeof x === "string");
+        const val = operands.length > 1
+            ? operands[1]
+            : operands.find((x:any) => typeof x === "bigint" || typeof x === "number" || typeof x === "string");
         let v;
         if (typeof val === "bigint") {
             v = val;
         } else if (typeof val === "number") {
             v = BigInt(val);
         } else if (typeof val === "string") {
-            if (/^0x[0-9a-fA-F]+$/.test(val)) {
-                v = BigInt(val);
-            } else if (/^-?\d+$/.test(val)) {
-                v = BigInt(parseInt(val, 10));
-            } else if (/^-?\d+u$/.test(val)) {
-                v = BigInt(parseInt(val.replace(/u$/, ''), 10));
-            } else if (/^-?\d+i$/.test(val)) {
-                v = BigInt(parseInt(val.replace(/i$/, ''), 10));
+            const normalized = val.replace(/[ui]$/i, '');
+            if (/^-?0x[0-9a-f]+$/i.test(normalized)) {
+                v = BigInt(normalized);
+            } else if (/^-?[0-9a-f]+h$/i.test(normalized)) {
+                const negative = normalized.startsWith('-');
+                const value = BigInt(`0x${normalized.replace(/^-?/, '').slice(0, -1)}`);
+                v = negative ? -value : value;
+            } else if (/^-?\d+$/.test(normalized)) {
+                v = BigInt(normalized);
             } else {
                 v = 0n;
             }
@@ -385,12 +393,15 @@ class OpcodeParser {
         const low3 = reg & 7;
 
         const width = this.regWidth(regOperand);
-        const rex = this.rex(reg, 0, width === 64 ? 1 : 0);
+        const rexW = width === 64 && base >= 0xB8 && base <= 0xBF ? 1 : 0;
+        const rex = this.rex(0, reg, rexW);
 
         const opcode = base + low3;
         const out = rex ? [rex, opcode] : [opcode];
 
-        const imm = operands.find((x:any) => typeof x === "number" || typeof x === "bigint");
+        const imm = operands.length > 1
+            ? operands[1]
+            : operands.find((x:any) => typeof x === "number" || typeof x === "bigint");
         if (imm !== undefined) {
             if (modifier === 'rb') {
                 out.push(this.encodeImm8(operands));
@@ -399,11 +410,7 @@ class OpcodeParser {
             } else if (modifier === 'rd') {
                 out.push(...this.encodeImm32(operands));
             } else if (modifier === 'rq') {
-                if (typeof imm === 'bigint') {
-                    out.push(...this.encodeImm64(operands));
-                } else {
-                    out.push(...this.encodeImm32(operands));
-                }
+                out.push(...this.encodeImm64(operands));
             }
         }
 

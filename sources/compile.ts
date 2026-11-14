@@ -12,13 +12,13 @@ import Prepare from './prepare.ts'
 function CompileF(source:string):string{
   const DATA:any = {}
   
-  source = source.replace(/(.*)\=(.*)/gm,(match:any,name:string,value:string)=>{
+  source = source.replace(/^\s*([a-z_]\w*)\s*=\s*([^;\r\n]*)(?:;[^\r\n]*)?$/gim,(match:any,name:string,value:string)=>{
     DATA[name.trim()] = value.trim()
     return ''
   })
 
   for(const key of Object.keys(DATA)){
-    source = source.replace(new RegExp('\\b'+key+'\\b','gm'),DATA[key])
+    source = source.replace(new RegExp('\\b'+key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gim'),DATA[key])
   }
 
   return source
@@ -38,6 +38,14 @@ function writeUInt32LE(array:any, value:any, offset:any, comment:string|null=nul
 function writeUInt16LE(array:any, value:any, offset:any, comment:string|null=null) {
   array[offset] = value & 0xff;
   array[offset + 1] = (value >> 8) & 0xff;
+}
+
+function writeUInt64LE(array:any, value:number | bigint, offset:number) {
+  let remaining = BigInt(value);
+  for (let index = 0; index < 8; index++) {
+    array[offset + index] = Number(remaining & 0xffn);
+    remaining >>= 8n;
+  }
 }
 
 export function Compile(source:string):Uint8Array {
@@ -109,7 +117,7 @@ export function Compile(source:string):Uint8Array {
     }
 
     const parameters = rawParameters
-      ? rawParameters.split(',').map((parameter:any) => parameter.trim())
+      ? rawParameters.split(',').map((parameter:any) => parameter.trim().replace(/^(?:byte|word|dword|qword)\s+/i, ''))
       : []
     const encoded = parser.encodeDetailed(instr, parameters)
     const bytes = encoded.bytes
@@ -124,23 +132,37 @@ export function Compile(source:string):Uint8Array {
         length: bytes.length
       })
     })
+    if (
+      (instr === 'mov r64, imm64' || instr === 'mov r/m64, imm32') &&
+      /^[a-z_.$][\w.$]*$/i.test(parameters[1] || '')
+    ) {
+      const width = instr === 'mov r64, imm64' ? 8 : 4
+      REPLS.push({
+        type: 'absolute',
+        expr: parameters[1].toLowerCase(),
+        addend: 0,
+        instructionOffset: OFFSET,
+        displacementOffset: OFFSET + bytes.length - width,
+        length: bytes.length,
+        width
+      })
+    }
     OFFSET += bytes.length
   })
 
   const assembledBytes:string[] = []
   for (const instruction of instructions) {
     let bytes = instruction.bytes
-    if (
-      (instruction.command === 'jmp' && instruction.instr === 'jmp rel32') ||
-      (instruction.command === 'call' && instruction.instr === 'call rel32')
-    ) {
+    if (instruction.instr.endsWith(' rel32')) {
       const target = instruction.parameters[0]?.toLowerCase()
       const targetOffset = labels.get(target)
-      if (targetOffset === undefined) {
+      if (targetOffset === undefined && /^[a-z_.$][\w.$]*$/i.test(instruction.parameters[0] || '')) {
         throw new Error(`Undefined label "${instruction.parameters[0]}" on line ${instruction.line}`)
       }
-      const relativeOffset = targetOffset - (instruction.offset + bytes.length)
-      bytes = parser.encode(instruction.instr, [{ rel: true, offset: relativeOffset }])
+      if (targetOffset !== undefined) {
+        const relativeOffset = targetOffset - (instruction.offset + bytes.length)
+        bytes = parser.encode(instruction.instr, [{ rel: true, offset: relativeOffset }])
+      }
     }
     assembledBytes.push(...bytes)
   }
@@ -433,22 +455,32 @@ export function Compile(source:string):Uint8Array {
   ];*/
 
   // Rezerwacja miejsca na Import Directory Table
-  let currentRva = idataRva + (IAT_LAYOUT.length + 1) * 20;
+  const importDirectorySize = (IAT_LAYOUT.length + 1) * 20;
+  const firstIatRva = idataRva + importDirectorySize;
+  const iatDirectorySize = IAT_LAYOUT.reduce(
+    (size:number, dllGroup:any) => size + (dllGroup.functions.length + 1) * 8,
+    0
+  );
+  let nextIatRva = firstIatRva;
+  let nextIltRva = firstIatRva + iatDirectorySize;
+  let nextNameRva = nextIltRva + iatDirectorySize;
   const iatAddresses:any = {};
 
   IAT_LAYOUT.forEach((dllGroup, dllIndex) => {
     const importDescOffset = idataRaw + (dllIndex * 20);
 
-    const iatRva = currentRva;
-    const iltRva = iatRva + (dllGroup.functions.length + 1) * 8;
-    currentRva = iltRva + (dllGroup.functions.length + 1) * 8;
+    const tableSize = (dllGroup.functions.length + 1) * 8;
+    const iatRva = nextIatRva;
+    const iltRva = nextIltRva;
+    nextIatRva += tableSize;
+    nextIltRva += tableSize;
 
     writeToidata(iltRva, importDescOffset + 0);
     writeToidata(0,      importDescOffset + 4);
     writeToidata(0,      importDescOffset + 8);
 
     dllGroup.functions.forEach((fnOnj:any, fnIndex:number) => {
-      const fnNameRva = currentRva;
+      const fnNameRva = nextNameRva;
       const fnNameRaw = idataRaw + (fnNameRva - idataRva);
 
       writeToidata(0, fnNameRaw, 2);
@@ -456,7 +488,7 @@ export function Compile(source:string):Uint8Array {
 
       const nameStructSize = 2 + fnOnj.target.length + 1;
       const paddedSize = (nameStructSize % 2 !== 0) ? nameStructSize + 1 : nameStructSize;
-      currentRva += paddedSize;
+      nextNameRva += paddedSize;
 
       const iatOffset = idataRaw + (iatRva - idataRva) + (fnIndex * 8);
       const iltOffset = idataRaw + (iltRva - idataRva) + (fnIndex * 8);
@@ -472,10 +504,10 @@ export function Compile(source:string):Uint8Array {
     writeToidata(0, iatNullOffset, 8);
     writeToidata(0, iltNullOffset, 8);
 
-    const dllNameRva = currentRva;
+    const dllNameRva = nextNameRva;
     const dllNameRaw = idataRaw + (dllNameRva - idataRva);
     writeHexToidata(textToHex(`${dllGroup.dll}\0`), dllNameRaw);
-    currentRva += dllGroup.dll.length + 1;
+    nextNameRva += dllGroup.dll.length + 1;
 
     writeToidata(dllNameRva, importDescOffset + 12);
     writeToidata(iatRva,     importDescOffset + 16);
@@ -549,13 +581,13 @@ export function Compile(source:string):Uint8Array {
   writeUInt32LE(exe, 0x00001000, optOffset + 96, 'Heap Commit');
   writeUInt32LE(exe, 16, optOffset + 108, 'Number of Data Directories');
 
-  // Import Table Directory (RVA 0x3000)
-  writeUInt32LE(exe, 0x00003000, optOffset + 120, 'Import Table RVA (.idata)');
-  writeUInt32LE(exe, 0x0000003C, optOffset + 124, 'Import Table Size');
+  // Import Table Directory
+  writeUInt32LE(exe, idataRva, optOffset + 120, 'Import Table RVA (.idata)');
+  writeUInt32LE(exe, importDirectorySize, optOffset + 124, 'Import Table Size');
 
-  // IAT Directory (RVA 0x3040)
-  writeUInt32LE(exe, 0x00003040, optOffset + 208, 'IAT RVA (.idata)');
-  writeUInt32LE(exe, 0x00000028, optOffset + 212, 'IAT Size');
+  // IAT Directory
+  writeUInt32LE(exe, firstIatRva, optOffset + 208, 'IAT RVA (.idata)');
+  writeUInt32LE(exe, iatDirectorySize, optOffset + 212, 'IAT Size');
 
   // --- 4. SECTION HEADERS ---
   let secOffset = optOffset + 240;
@@ -610,9 +642,23 @@ export function Compile(source:string):Uint8Array {
   for(const RP of REPLS){
     const targetRva = DATASET[RP.expr] !== undefined
       ? DATASET[RP.expr]
-      : iatAddresses[RP.expr];
+      : iatAddresses[RP.expr] !== undefined
+        ? iatAddresses[RP.expr]
+        : labels.has(RP.expr)
+          ? 0x1000 + labels.get(RP.expr)!
+          : undefined;
     if (targetRva === undefined) {
       throw new Error(`Undefined memory symbol "${RP.expr}"`);
+    }
+
+    if (RP.type === 'absolute') {
+      const address = 0x400000 + targetRva + RP.addend;
+      if (RP.width === 8) {
+        writeUInt64LE(code, address, RP.displacementOffset);
+      } else {
+        writeUInt32LE(code, address, RP.displacementOffset);
+      }
+      continue;
     }
 
     const relativeOffset = targetRva + RP.addend - (RVA_TEXT_START + RP.instructionOffset + RP.length);
