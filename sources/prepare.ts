@@ -92,6 +92,13 @@ function replaceProcedureIdentifier(line:string, name:string, replacement:string
     return result
 }
 
+function requireProcedureReturn(lines:string[], name:string): void {
+    const lastStatement = lines.map(line => line.split(';', 1)[0].trim()).filter(Boolean).pop()
+    if (!lastStatement || !/^ret(?:\s+\d+)?$/i.test(lastStatement)) {
+        throw new Error(`Procedure "${name}" must end with "ret" before "endp"`)
+    }
+}
+
 function expandStructs(code:string): { code: string; methodCalls: Map<string, { label: string; instance: string }> } {
     type StructMember = { name: string; declaration: string; offset: number }
     type StructMethod = { name: string; parameters: string[]; body: string[] }
@@ -113,6 +120,7 @@ function expandStructs(code:string): { code: string; methodCalls: Map<string, { 
 
         if (currentMethod) {
             if (/^endp$/i.test(content)) {
+                requireProcedureReturn(currentMethod.body, `${currentStruct!.name}.${currentMethod.name}`)
                 if (currentStruct!.methods.some(method => method.name.toLowerCase() === currentMethod!.name.toLowerCase())) {
                     throw new Error(`Duplicate struct method "${currentMethod.name}" on line ${currentMethod.line}`)
                 }
@@ -320,18 +328,17 @@ function expandStructs(code:string): { code: string; methodCalls: Map<string, { 
             ...(needsAlignmentPadding ? ['add rsp, 8'] : []),
             ...savedRegisters.slice().reverse().map(register => `pop ${register}`)
         ]
-        const epilogueLabel = `${owner}.${method.name}.__exit`
-        const body = method.body.map(line => {
-            const returnStatement = line.match(/^(\s*)ret\s*(?:;.*)?$/i)
-            if (returnStatement) return `${returnStatement[1]}jmp ${epilogueLabel}`
+        const body = method.body.flatMap(line => {
+            const returnStatement = line.match(/^(\s*)ret(?:\s+\d+)?\s*(?:;.*)?$/i)
+            if (returnStatement) return [...epilogue.map(instruction => `${returnStatement[1]}${instruction}`), line]
             let result = replaceThisMember(line, owner)
             result = replaceIdentifier(result, 'this', 'rsi')
             for (const parameter of parameters) {
                 result = replaceIdentifier(result, parameter.name, parameter.replacement)
             }
-            return result
+            return [result]
         })
-        return [`proc ${owner}.${method.name}`, ...prologue, ...body, `${epilogueLabel}:`, ...epilogue, 'endp']
+        return [`proc ${owner}.${method.name}`, ...prologue, ...body, 'endp']
     })
 
     if (methodCode.length) {
@@ -448,13 +455,14 @@ export function Prepare(code:string){
         return match
     })*/
 
-    code = code.replace(/proc([\s\S]+?)endp/gm,match=>{
+    code = code.replace(/^[ \t]*proc\b[^\r\n]*\r?\n[\s\S]*?^[ \t]*endp[ \t]*(?:;[^\r\n]*)?\r?$/gim,match=>{
         const lines = match.split(/\r?\n/)
         const header = lines[0].trim().match(/^proc\s+([^\s,]+)(?:\s*,\s*(.*)|\s+(.+))?$/i)
         if (!header) {
             throw new Error(`Invalid procedure declaration: ${lines[0].trim()}`)
         }
         const name = header[1]
+        requireProcedureReturn(lines.slice(1, -1), name)
         const params = (header[2] || header[3] || '')
         const parameters = params ? splitTopLevelCommaList(params) : []
         const parameterNames = new Set(parameters.map(parameter => parameter.toLowerCase()))
@@ -504,23 +512,21 @@ export function Prepare(code:string){
         }
 
         const frameSize = parameters.length * 8 + localBytes
+        body = body.split(/\r?\n/).map(line => {
+            const returnStatement = line.match(/^(\s*)ret(?:\s+\d+)?\s*(?:;.*)?$/i)
+            if (!returnStatement) return line
+            const indent = returnStatement[1]
+            return `${indent}add rsp, ${frameSize}\n${indent}mov rsp, rbp\n${indent}pop rbp\n${line}`
+        }).join('\n')
         return `${name}:
     push rbp
     mov rbp, rsp
     sub rsp, ${frameSize}
 ${initializers.length ? `\n    ${initializers.join('\n    ')}\n` : ''}
-    ${body}
-
-    add rsp, ${frameSize}
-    mov rsp, rbp
-    pop rbp
-
-    ret`
+    ${body}`
     })
 
     const REGS = ['rcx','rdx','r8','r9']
-    const REGS6 = ['rcx','rdx','r8','r9','[rsp+32]','[rsp+24]']
-    const REGS8 = ['rcx','rdx','r8','r9','[rsp+32]','[rsp+40]','[rsp+48]','[rsp+56]']
 
     code = code.replace(/invoke .*/gm,match=>{
         let name = match.split(' ')[1].trim()
@@ -532,35 +538,35 @@ ${initializers.length ? `\n    ${initializers.join('\n    ')}\n` : ''}
             params.unshift(`addr ${methodCall.instance}`)
         }
         params = params.map((param:any)=>normalizeStringParameter(param))
-        let reg = 0
-        params = params.map((param:any,i:number)=>{
-            if(i<4){
-                const address = param.match(/^addr\s+(.+)$/i)
-                let oper = 'mov'
-                if(address){
-                    oper = 'lea'
-                    const target = address[1].trim()
-                    param = target.startsWith('[') && target.endsWith(']')
-                        ? target
-                        : `[${target}]`
-                }
-                return `${oper} ${REGS[reg++]}, ${param}`
-            }else{
-                if(params.length<=6){
-                    return `mov ${REGS6[reg++]}, ${param}`
-                }else{
-                    return `mov ${REGS8[reg++]}, ${param}`
-                }
+        const stackBytes = 32 + Math.max(0,params.length - REGS.length) * 8
+        const stackSize = stackBytes + (stackBytes % 16 === 0 ? 8 : 0)
+        const registerArgs = params.slice(0,REGS.length).map((param:string,index:number)=>{
+            const address = param.match(/^addr\s+(.+)$/i)
+            if(address){
+                const target = address[1].trim()
+                const operand = target.startsWith('[') && target.endsWith(']')
+                    ? target
+                    : `[${target}]`
+                return `lea ${REGS[index]}, ${operand}`
             }
+            return `mov ${REGS[index]}, ${param}`
         })
-        let sub = 40
-        if(params.length>6){
-            sub = 64
-        }
-        return `    sub rsp, ${sub}
-    ${params.join('\n')}
+        const stackArgs = params.slice(REGS.length).flatMap((param:string,index:number)=>{
+            const offset = 32 + index * 8
+            const address = param.match(/^addr\s+(.+)$/i)
+            if(address){
+                const target = address[1].trim()
+                const operand = target.startsWith('[') && target.endsWith(']')
+                    ? target
+                    : `[${target}]`
+                return [`lea rax, ${operand}`,`mov qword [rsp+${offset}], rax`]
+            }
+            return [`mov rax, ${param}`,`mov qword [rsp+${offset}], rax`]
+        })
+        return `    sub rsp, ${stackSize}
+    ${[...registerArgs,...stackArgs].join('\n')}
     call ${methodCall ? name : `[${name}]`}
-    add rsp, ${sub}`
+    add rsp, ${stackSize}`
     })
 
     code = code.replace(/rvcall .*/gm,match=>{

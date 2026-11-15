@@ -20,11 +20,13 @@
 
     proc EndoFunc hello
         invoke printf, hello
+        ret
     endp
 
     proc EndoFunc2
         local testProp dq 123
         invoke printf, addr formatA, [testProp]
+        ret
     endp
 
 .data

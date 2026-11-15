@@ -17,9 +17,11 @@
             invoke printf, 'mmm %i', [this.propA]
             invoke printf, 'method %i', [this+OBJ.propA]
             invoke printf, ' arg %i', value
+            ret
         endp
         proc show2
             invoke printf, 'vvv %i', [this.propA]
+            ret
         endp
     end struct
     obj OBJ
