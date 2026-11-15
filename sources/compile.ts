@@ -115,7 +115,7 @@ export function Compile(source:string):Uint8Array {
     const line = sourceLine.split(';', 1)[0].trim()
     if (!line) return
 
-    const labelMatch = line.match(/^([a-z_.$][\w.$]*):$/i)
+    const labelMatch = line.match(/^([a-z_.$][\w.$]*)\s*:\s*$/i)
     if (labelMatch) {
       const label = labelMatch[1].toLowerCase()
       if (labels.has(label)) {
