@@ -500,7 +500,7 @@ export function Prepare(code:string){
 
         let body = bodyLines.join('\n')
         parameters.forEach((parameter, index) => {
-            const stackOffset = 16 + 32 + (parameters.length % 2) * 8 + (parameters.length - index - 1) * 8
+            const stackOffset = 16 + 32 + (parameters.length % 2 === 0 ? 8 : 0) + (parameters.length - index - 1) * 8
             body = body.split(/\r?\n/).map(line =>
                 replaceProcedureIdentifier(line, parameter, `[rbp+${stackOffset}]`)
             ).join('\n')
@@ -511,17 +511,18 @@ export function Prepare(code:string){
             ).join('\n')
         }
 
-        const frameSize = parameters.length * 8 + localBytes
+        const rawFrameSize = parameters.length * 8 + localBytes
+        const frameSize = rawFrameSize + (rawFrameSize % 16 === 8 ? 0 : 8)
         body = body.split(/\r?\n/).map(line => {
             const returnStatement = line.match(/^(\s*)ret(?:\s+\d+)?\s*(?:;.*)?$/i)
             if (!returnStatement) return line
             const indent = returnStatement[1]
-            return `${indent}add rsp, ${frameSize}\n${indent}mov rsp, rbp\n${indent}pop rbp\n${line}`
+            return `${indent}mov rsp, rbp\n${indent}pop rbp\n${line}`
         }).join('\n')
         return `${name}:
     push rbp
     mov rbp, rsp
-    sub rsp, ${frameSize}
+    lea rsp, [rsp-${frameSize}]
 ${initializers.length ? `\n    ${initializers.join('\n    ')}\n` : ''}
     ${body}`
     })
@@ -586,7 +587,7 @@ ${initializers.length ? `\n    ${initializers.join('\n    ')}\n` : ''}
             }
             return `push ${param.startsWith('[') && param.endsWith(']') ? param : `[${param}]`}`
         })
-        const shadowSpace = 32 + (params.length % 2) * 8
+        const shadowSpace = 32 + (params.length % 2 === 0 ? 8 : 0)
         return `    ${pushes.join('\n')}
     sub rsp, ${shadowSpace}
     call ${name}
