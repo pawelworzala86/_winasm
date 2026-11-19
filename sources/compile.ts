@@ -190,13 +190,14 @@ export function Compile(source:string):Uint8Array {
 
 
   const codeRawStart = 0x200;
-  let codeRawSize
-  {
-    const idataVirtualSize = hex.length / 2;
-    const fileAlignment = 0x200;
-    codeRawSize = Math.ceil(idataVirtualSize / fileAlignment) * fileAlignment;
-    hex = hex.padEnd(codeRawSize * 2, '0');
-  }
+  const fileAlignment = 0x200;
+  const sectionAlignment = 0x1000;
+  const alignTo = (size:number,alignment:number)=>Math.ceil(size/alignment)*alignment;
+  const textRva = sectionAlignment;
+  const codeVirtualSize = hex.length / 2;
+  const codeRawSize = alignTo(codeVirtualSize,fileAlignment);
+  hex = hex.padEnd(codeRawSize * 2, '0');
+  const dataRva = alignTo(textRva + codeVirtualSize,sectionAlignment);
   const code = Buffer.from(hex,'hex')
 
 
@@ -223,8 +224,8 @@ export function Compile(source:string):Uint8Array {
 
 
   // --- 5. ZAWARTOŚĆ SEKCJI .data (RAW 0x400, RVA 0x2000) ---
-  const dataRawStart = codeRawSize + codeRawStart
-  const stringHelloRva = 0x2000;
+  const dataRawStart = codeRawStart + codeRawSize
+  const stringHelloRva = dataRva;
 
 
   let dataHex = ''
@@ -412,13 +413,9 @@ export function Compile(source:string):Uint8Array {
 
   dataHex = dataHex.replace(/\t|\r|\n\|\ /gm,'')
 
-  let dataRawSize
-  {
-    const idataVirtualSize = dataHex.length / 2;
-    const fileAlignment = 0x200;
-    dataRawSize = Math.ceil(idataVirtualSize / fileAlignment) * fileAlignment;
-    dataHex = dataHex.padEnd(dataRawSize * 2, '0');
-  }
+  const dataVirtualSize = dataHex.length / 2;
+  const dataRawSize = alignTo(dataVirtualSize,fileAlignment);
+  dataHex = dataHex.padEnd(dataRawSize * 2, '0');
   const dataSet = Buffer.from(dataHex,'hex')
 
 
@@ -464,7 +461,7 @@ export function Compile(source:string):Uint8Array {
   const idataRawStart = dataRawStart + dataRawSize
 
   let idataRaw = codeRawSize + 0x400;
-  const idataRva = 0x3000;
+  const idataRva = alignTo(dataRva + dataVirtualSize,sectionAlignment);
 
 
 
@@ -560,8 +557,7 @@ export function Compile(source:string):Uint8Array {
   }
 
   const idataVirtualSize = idata.length / 2;
-  const fileAlignment = 0x200;
-  const idataRawSize = Math.ceil(idataVirtualSize / fileAlignment) * fileAlignment;
+  const idataRawSize = alignTo(idataVirtualSize,fileAlignment);
   idata = idata.padEnd(idataRawSize * 2, '0');
 
 
@@ -597,21 +593,21 @@ export function Compile(source:string):Uint8Array {
   const optOffset = peOffset + 24;
   writeUInt16LE(exe, 0x020B, optOffset, 'Magic: PE32+ (64-bit)');
 
-  writeUInt32LE(exe, 0x00000200, optOffset + 4, 'Size of Code');
+  writeUInt32LE(exe, codeRawSize, optOffset + 4, 'Size of Code');
   writeUInt32LE(exe, dataRawSize + idataRawSize, optOffset + 8, 'Size of Initialized Data (.data + .idata)');
 
-  writeUInt32LE(exe, 0x00001000, optOffset + 16, 'Address of Entry Point (RVA)');
-  writeUInt32LE(exe, 0x00001000, optOffset + 20, 'Base Of Code');
+  writeUInt32LE(exe, textRva, optOffset + 16, 'Address of Entry Point (RVA)');
+  writeUInt32LE(exe, textRva, optOffset + 20, 'Base Of Code');
 
   writeUInt32LE(exe, 0x00400000, optOffset + 24, 'ImageBase (0x00400000)');
 
-  writeUInt32LE(exe, 0x00001000, optOffset + 32, 'Section Alignment (0x1000)');
-  writeUInt32LE(exe, 0x00000200, optOffset + 36, 'File Alignment (0x200)');
+  writeUInt32LE(exe, sectionAlignment, optOffset + 32, 'Section Alignment (0x1000)');
+  writeUInt32LE(exe, fileAlignment, optOffset + 36, 'File Alignment (0x200)');
   writeUInt16LE(exe, 6, optOffset + 40, 'Major OS Version');
   writeUInt16LE(exe, 0, optOffset + 42, 'Minor OS Version');
   writeUInt16LE(exe, 6, optOffset + 48, 'Major Subsystem Version');
   writeUInt16LE(exe, 0, optOffset + 50, 'Minor Subsystem Version');
-  const sizeOfImage = Math.ceil((idataRva + idataVirtualSize) / 0x1000) * 0x1000;
+  const sizeOfImage = alignTo(idataRva + Math.max(idataVirtualSize,idataRawSize),sectionAlignment);
   writeUInt32LE(exe, sizeOfImage, optOffset + 56, 'Size of Image');
   writeUInt32LE(exe, 0x00000200, optOffset + 60, 'Size of Headers');
   writeUInt16LE(exe, 3, optOffset + 68, 'Subsystem: 3 = Windows CUI (Konsola)');
@@ -635,8 +631,8 @@ export function Compile(source:string):Uint8Array {
 
   // Sekcja 1: .text (RVA 0x1000, RAW 0x200)
   exe.set(new TextEncoder().encode('.text\0\0\0'), secOffset);
-  writeUInt32LE(exe, 0x00001000, secOffset + 8, 'Virtual Size .text');
-  writeUInt32LE(exe, 0x00001000, secOffset + 12, 'Virtual Address .text (RVA 0x1000)');
+  writeUInt32LE(exe, codeVirtualSize, secOffset + 8, 'Virtual Size .text');
+  writeUInt32LE(exe, textRva, secOffset + 12, 'Virtual Address .text');
   writeUInt32LE(exe, codeRawSize, secOffset + 16, 'Size of Raw Data .text');
   writeUInt32LE(exe, codeRawStart, secOffset + 20, 'Pointer to Raw Data .text (0x200)');
   writeUInt32LE(exe, 0x60000020, secOffset + 36, 'CODE | EXECUTE | READ');
@@ -644,8 +640,8 @@ export function Compile(source:string):Uint8Array {
   // Sekcja 2: .data (RVA 0x2000, RAW 0x400)
   secOffset += 40;
   exe.set(new TextEncoder().encode('.data\0\0\0'), secOffset);
-  writeUInt32LE(exe, 0x00001000, secOffset + 8, 'Virtual Size .data');
-  writeUInt32LE(exe, 0x00002000, secOffset + 12, 'Virtual Address .data (RVA 0x2000)');
+  writeUInt32LE(exe, dataVirtualSize, secOffset + 8, 'Virtual Size .data');
+  writeUInt32LE(exe, dataRva, secOffset + 12, 'Virtual Address .data');
   writeUInt32LE(exe, dataRawSize, secOffset + 16, 'Size of Raw Data .data');
   writeUInt32LE(exe, dataRawStart, secOffset + 20, 'Pointer to Raw Data .data (0x400)');
   writeUInt32LE(exe, 0xC0000040, secOffset + 36, 'INITIALIZED_DATA | READ | WRITE');
@@ -654,7 +650,7 @@ export function Compile(source:string):Uint8Array {
   secOffset += 40;
   exe.set(new TextEncoder().encode('.idata\0\0'), secOffset);
   writeUInt32LE(exe, idataVirtualSize, secOffset + 8, 'Virtual Size .idata');
-  writeUInt32LE(exe, 0x00003000, secOffset + 12, 'Virtual Address .idata (RVA 0x3000)');
+  writeUInt32LE(exe, idataRva, secOffset + 12, 'Virtual Address .idata');
   writeUInt32LE(exe, idataRawSize, secOffset + 16, 'Size of Raw Data .idata');
   writeUInt32LE(exe, idataRawStart, secOffset + 20, 'Pointer to Raw Data .idata (0x600)');
   writeUInt32LE(exe, 0xC0000040, secOffset + 36, 'INITIALIZED_DATA | READ | WRITE');
@@ -672,7 +668,7 @@ export function Compile(source:string):Uint8Array {
 
 
   // --- 7. KOD .text (RAW 0x200, RVA 0x1000) ---
-  const RVA_TEXT_START = 0x1000;
+  const RVA_TEXT_START = textRva;
 
 
 
@@ -686,7 +682,7 @@ export function Compile(source:string):Uint8Array {
       : iatAddresses[RP.expr] !== undefined
         ? iatAddresses[RP.expr]
         : labels.has(RP.expr)
-          ? 0x1000 + labels.get(RP.expr)!
+          ? textRva + labels.get(RP.expr)!
           : undefined;
     if (targetRva === undefined) {
       throw new Error(`Undefined memory symbol "${RP.expr}"`);
