@@ -10,31 +10,75 @@ import Prepare from './prepare.ts'
 
 
 function CompileF(source:string):string{
-  const DATA:any = {}
+  const DATA = new Map<string,string>()
   
   source = source.replace(/^\s*([a-z_]\w*)\s*=\s*([^;\r\n]*)(?:;[^\r\n]*)?$/gim,(match:any,name:string,value:string)=>{
-    DATA[name.trim()] = value.trim()
+    DATA.set(name.trim().toLowerCase(),value.trim())
     return ''
   })
 
-  for(const key of Object.keys(DATA)){
+  const resolvedData = new Map<string,string>()
+  const resolveConstant = (key:string,chain:string[]=[]):string=>{
+    const resolved = resolvedData.get(key)
+    if(resolved!==undefined){
+      return resolved
+    }
+    if(chain.includes(key)){
+      throw new Error(`Cyclic constant definition: ${[...chain,key].join(' -> ')}`)
+    }
+    const value = DATA.get(key)
+    if(value===undefined){
+      return key
+    }
+    const resolvedValue = value.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|[a-z_]\w*/gi,token=>{
+      if(token.startsWith("'")||token.startsWith('"')){
+        return token
+      }
+      const referencedKey = token.toLowerCase()
+      return DATA.has(referencedKey)
+        ? resolveConstant(referencedKey,[...chain,key])
+        : token
+    })
+    resolvedData.set(key,resolvedValue)
+    return resolvedValue
+  }
+  for(const key of DATA.keys()){
+    resolveConstant(key)
+  }
+
+  for(const [key,value] of resolvedData){
     source = source.replace(
       new RegExp('\\b'+key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gim'),
       (match:string, offset:number, wholeSource:string) => {
         const lineStart = wholeSource.lastIndexOf('\n', offset) + 1
         const linePrefix = wholeSource.slice(lineStart, offset)
-        const precedingText = wholeSource.slice(0, offset)
-        const inString = (precedingText.match(/'/g) || []).length % 2 !== 0
+        let quote:string|null = null
+        let escaped = false
+        for(const character of linePrefix){
+          if(escaped){
+            escaped = false
+          }else if(character==='\\'&&quote){
+            escaped = true
+          }else if(quote){
+            if(character===quote){
+              quote = null
+            }
+          }else if(character==="'"||character==='"'){
+            quote = character
+          }else if(character===';'){
+            break
+          }
+        }
 
         if (
-          inString ||
+          quote!==null ||
           /^\s*$/.test(linePrefix) ||
           /\baddr\s*$/i.test(linePrefix) ||
           /\[\s*$/.test(linePrefix)
         ) {
           return match
         }
-        return DATA[key]
+        return value
       }
     )
   }

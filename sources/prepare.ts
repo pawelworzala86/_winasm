@@ -585,6 +585,9 @@ ${initializers.length ? `\n    ${initializers.join('\n    ')}\n` : ''}
                     : `[${target}]`
                 return `lea rax, ${operand}\npush rax`
             }
+            if(/^[+-]?(?:0x[0-9a-f]+|\d+)$/i.test(param)){
+                return `mov rax, ${param}\npush rax`
+            }
             return `push ${param.startsWith('[') && param.endsWith(']') ? param : `[${param}]`}`
         })
         const shadowSpace = 32 + (params.length % 2 === 0 ? 8 : 0)
